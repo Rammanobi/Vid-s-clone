@@ -65,6 +65,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await db_client.connect()
     start_metrics_server()
     logger.info("app_started", environment=settings.environment)
+    try:
+        from app.analytics import snapshot_all_metrics
+
+        snap_result = await snapshot_all_metrics(db_client, limit=50)
+        logger.info(
+            "startup_snapshot_complete",
+            snapshots=snap_result["snapshots_created"],
+        )
+    except Exception as exc:
+        logger.warning("startup_snapshot_skipped", error=str(exc))
     yield
     if db_client:
         await db_client.close()

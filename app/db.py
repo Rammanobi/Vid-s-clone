@@ -399,3 +399,103 @@ class DatabaseClient:
                     virality_score=virality_score,
                 )
             return result
+
+    async def insert_reel_snapshot(
+        self,
+        reel_db_id: str,
+        views: int = 0,
+        likes: int = 0,
+        comments_count: int = 0,
+        saves: int | None = None,
+        shares: int | None = None,
+        reach: int | None = None,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "ReelSnapshot" (
+                    "reelId", "views", "likes", "commentsCount",
+                    "saves", "shares", "reach"
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING "id", "reelId", "snapshotAt"
+                """,
+                reel_db_id,
+                views,
+                likes,
+                comments_count,
+                saves,
+                shares,
+                reach,
+            )
+            result = dict(row) if row else None
+            if result:
+                logger.debug(
+                    "reel_snapshot_inserted",
+                    reel_id=reel_db_id,
+                    snapshot_id=result["id"],
+                )
+            return result
+
+    async def get_reel_snapshots(
+        self,
+        reel_db_id: str,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM "ReelSnapshot" WHERE "reelId" = $1 '
+                'ORDER BY "snapshotAt" DESC LIMIT $2 OFFSET $3',
+                reel_db_id,
+                limit,
+                offset,
+            )
+            return [dict(r) for r in rows]
+
+    async def get_reels_with_metrics(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT r."id", r."instagramReelId", r."videoUrl",
+                       r."views", r."likes", r."commentsCount",
+                       r."saves", r."shares", r."reach",
+                       r."durationSec", r."postedAt",
+                       a."followerCount", a."postsCount"
+                FROM "Reel" r
+                JOIN "Account" a ON r."accountId" = a."id"
+                ORDER BY r."postedAt" DESC
+                LIMIT $1 OFFSET $2
+                """,
+                limit,
+                offset,
+            )
+            return [dict(r) for r in rows]
+
+    async def get_reel_metrics(
+        self,
+        reel_db_id: str,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                'SELECT * FROM "ReelMetric" WHERE "reelId" = $1',
+                reel_db_id,
+            )
+            return dict(row) if row else None
+
+    async def get_reel_count(self) -> int:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval('SELECT COUNT(*) FROM "Reel"')

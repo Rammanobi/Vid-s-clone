@@ -69,5 +69,22 @@ class Settings:
         os.environ.get("VISUAL_CHANGE_THRESHOLD", "0.05")
     )
 
+    # LLM / AI
+    openai_api_key: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_API_KEY", "")
+    )
+    openai_base_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        )
+    )
+    llm_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "LLM_MODEL", "gpt-4o-mini"
+        )
+    )
+    llm_max_retries: int = int(os.environ.get("LLM_MAX_RETRIES", "3"))
+    llm_timeout_sec: int = int(os.environ.get("LLM_TIMEOUT_SEC", "30"))
+
 
 settings = Settings()

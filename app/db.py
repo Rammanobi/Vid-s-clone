@@ -321,3 +321,81 @@ class DatabaseClient:
                     topic=topic,
                 )
             return result
+
+    async def upsert_reel_metrics(
+        self,
+        reel_db_id: str,
+        views: int = 0,
+        likes: int = 0,
+        comments_count: int = 0,
+        saves: int | None = None,
+        shares: int | None = None,
+        reach: int | None = None,
+        engagement_rate: float = 0.0,
+        save_rate: float | None = None,
+        share_rate: float | None = None,
+        comment_rate: float | None = None,
+        virality_score: float = 1.0,
+        view_to_follower: float = 0.0,
+        metric_quality: str = "FULL",
+        is_volatile: bool = False,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "ReelMetric" (
+                    "reelId", "views", "likes", "commentsCount",
+                    "saves", "shares", "reach",
+                    "engagementRate", "saveRate", "shareRate",
+                    "commentRate", "viralityScore", "viewToFollower",
+                    "metricQuality", "isVolatile"
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    $8, $9, $10, $11, $12, $13,
+                    $14::"MetricQuality", $15
+                )
+                ON CONFLICT ("reelId")
+                DO UPDATE SET
+                    "views" = EXCLUDED."views",
+                    "likes" = EXCLUDED."likes",
+                    "commentsCount" = EXCLUDED."commentsCount",
+                    "saves" = EXCLUDED."saves",
+                    "shares" = EXCLUDED."shares",
+                    "reach" = EXCLUDED."reach",
+                    "engagementRate" = EXCLUDED."engagementRate",
+                    "saveRate" = EXCLUDED."saveRate",
+                    "shareRate" = EXCLUDED."shareRate",
+                    "commentRate" = EXCLUDED."commentRate",
+                    "viralityScore" = EXCLUDED."viralityScore",
+                    "viewToFollower" = EXCLUDED."viewToFollower",
+                    "metricQuality" = EXCLUDED."metricQuality",
+                    "isVolatile" = EXCLUDED."isVolatile"
+                RETURNING "id", "reelId", "engagementRate", "viralityScore"
+                """,
+                reel_db_id,
+                views,
+                likes,
+                comments_count,
+                saves,
+                shares,
+                reach,
+                engagement_rate,
+                save_rate,
+                share_rate,
+                comment_rate,
+                virality_score,
+                view_to_follower,
+                metric_quality,
+                is_volatile,
+            )
+            result = dict(row) if row else None
+            if result:
+                logger.debug(
+                    "reel_metrics_upserted",
+                    reel_id=reel_db_id,
+                    engagement_rate=engagement_rate,
+                    virality_score=virality_score,
+                )
+            return result

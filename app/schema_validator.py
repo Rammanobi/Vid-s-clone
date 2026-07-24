@@ -81,3 +81,21 @@ class ContentIntelligenceSchema(BaseModel):
     audience_intent: str | None = Field(None, max_length=200)
     sentiment: str | None = Field(None, max_length=100)
     visual_style: str | None = Field(None, max_length=200)
+
+
+class ReelMetricSchema(BaseModel):
+    reel_id: str
+    views: int = Field(default=0, ge=0)
+    likes: int = Field(default=0, ge=0)
+    comments_count: int = Field(default=0, ge=0)
+    saves: int | None = Field(default=None, ge=0)
+    shares: int | None = Field(default=None, ge=0)
+    reach: int | None = Field(default=None, ge=0)
+    engagement_rate: float = Field(default=0.0, ge=0.0)
+    save_rate: float | None = Field(default=None, ge=0.0)
+    share_rate: float | None = Field(default=None, ge=0.0)
+    comment_rate: float | None = Field(default=None, ge=0.0)
+    virality_score: float = Field(default=1.0, ge=0.0)
+    view_to_follower: float = Field(default=0.0, ge=0.0)
+    metric_quality: MetricQuality = MetricQuality.FULL
+    is_volatile: bool = False

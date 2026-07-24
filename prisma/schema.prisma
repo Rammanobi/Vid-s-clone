@@ -1,0 +1,277 @@
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+enum HookType {
+  CURIOSITY
+  CONTRARIAN
+  STORY
+  PROBLEM_SOLUTION
+  QUESTION
+  OTHER
+}
+
+enum ContentFormat {
+  TUTORIAL
+  BEHIND_THE_SCENES
+  TALKING_HEAD
+  SCREEN_RECORDING
+  SKIT
+  OTHER
+}
+
+enum MetricQuality {
+  FULL
+  PARTIAL
+}
+
+// ==========================================
+// 1. ACCOUNT & CREATOR KNOWLEDGE LAYER
+// ==========================================
+
+model Account {
+  id               String           @id @default(uuid())
+  instagramId      String           @unique
+  username         String           @unique
+  followerCount    Int              @default(0)
+  followingCount   Int              @default(0)
+  postsCount       Int              @default(0)
+  isCompetitor     Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  reels            Reel[]
+  snapshots        AccountSnapshot[]
+  creatorProfile   CreatorProfile?
+
+  @@index([username])
+}
+
+model CreatorProfile {
+  id                 String         @id @default(uuid())
+  accountId          String         @unique
+  account            Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  bestTopics         String[]
+  worstTopics        String[]
+  bestHookTypes      HookType[]
+  bestPostingDay     String?
+  bestDurationRange  String?
+  bestContentFormat  ContentFormat?
+  audienceInterests  String[]
+
+  updatedAt          DateTime       @updatedAt
+}
+
+model AccountSnapshot {
+  id            String   @id @default(uuid())
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  followerCount Int
+  snapshotAt    DateTime @default(now())
+
+  @@index([accountId, snapshotAt])
+}
+
+// ==========================================
+// 2. REELS, MULTIMODAL & HYBRID VECTOR SEARCH
+// ==========================================
+
+model Reel {
+  id              String   @id @default(uuid())
+  accountId       String
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  instagramReelId String   @unique
+  videoUrl        String
+  caption         String?  @db.Text
+  durationSec     Float
+  postedAt        DateTime
+
+  transcript      String?  @db.Text
+  transcriptJson  Json?
+  visualTopics    String[]
+  textOverlays    String[]
+  visualSummary   String?  @db.Text
+
+  combinedEmbedding Unsupported("vector(1536)")?
+
+  searchVector    Unsupported("tsvector")?
+
+  metrics         ReelMetric?
+  metricSnapshots ReelSnapshot[]
+  intelligence    ContentIntelligence?
+  comments        Comment[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([accountId, postedAt])
+}
+
+model ContentIntelligence {
+  id             String        @id @default(uuid())
+  reelId         String        @unique
+  reel           Reel          @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  topic          String?
+  hookType       HookType?
+  hookText       String?
+  cta            String?
+  contentFormat  ContentFormat?
+  teachingStyle  String?
+  narrativeStyle String?
+  audienceIntent String?
+  sentiment      String?
+  visualStyle    String?
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([topic])
+  @@index([hookType])
+  @@index([teachingStyle])
+}
+
+// ==========================================
+// 3. ANALYTICS LAYER & METRIC DRIFT SNAPSHOTS
+// ==========================================
+
+model ReelMetric {
+  id                 String        @id @default(uuid())
+  reelId             String        @unique
+  reel               Reel          @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  views              Int           @default(0)
+  likes              Int           @default(0)
+  commentsCount      Int           @default(0)
+  saves              Int?
+  shares             Int?
+  reach              Int?
+
+  engagementRate     Float         @default(0.0)
+  saveRate           Float?
+  shareRate          Float?
+  commentRate        Float?
+  viralityScore      Float         @default(1.0)
+  viewToFollower     Float         @default(0.0)
+
+  metricQuality      MetricQuality @default(FULL)
+  isVolatile         Boolean       @default(false)
+
+  calculatedAt       DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([viralityScore])
+  @@index([engagementRate])
+}
+
+model ReelSnapshot {
+  id            String   @id @default(uuid())
+  reelId        String
+  reel          Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  views         Int      @default(0)
+  likes         Int      @default(0)
+  commentsCount Int      @default(0)
+  saves         Int?
+  shares        Int?
+  reach         Int?
+
+  snapshotAt    DateTime @default(now())
+
+  @@index([reelId, snapshotAt])
+}
+
+model Comment {
+  id          String   @id @default(uuid())
+  reelId      String
+  reel        Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+
+  authorId    String
+  text        String   @db.Text
+  isCreator   Boolean  @default(false)
+  postedAt    DateTime
+
+  @@index([reelId])
+}
+
+// ==========================================
+// 4. COMPETITOR & TREND STORES
+// ==========================================
+
+model CompetitorInsight {
+  id             String        @id @default(uuid())
+  competitorId   String
+  niche          String
+  winningFormat  ContentFormat?
+  topTopics      String[]
+  avgVirality    Float         @default(1.0)
+  updatedAt      DateTime      @updatedAt
+
+  @@index([niche])
+}
+
+model TrendStore {
+  id             String   @id @default(uuid())
+  topic          String
+  hookPattern    String?
+  contentFormat  ContentFormat?
+  viralityScore  Float    @default(1.0)
+  detectedAt     DateTime @default(now())
+
+  @@index([topic])
+  @@index([viralityScore])
+}
+
+// ==========================================
+// 5. AGENT EXECUTION & LANGGRAPH STATE
+// ==========================================
+
+model Session {
+  id           String        @id @default(uuid())
+  userId       String
+  summary      String?       @db.Text
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  messages     ChatMessage[]
+  agentRuns    AgentExecutionLog[]
+}
+
+model ChatMessage {
+  id           String   @id @default(uuid())
+  sessionId    String
+  session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  role         String
+  content      String   @db.Text
+  citations    Json?
+
+  createdAt    DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+model AgentExecutionLog {
+  id              String   @id @default(uuid())
+  sessionId       String
+  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  intent          String?
+  retrievalPlan   Json?
+  confidenceScore Float?
+  routingDecision String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([sessionId])
+}

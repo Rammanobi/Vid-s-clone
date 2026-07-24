@@ -261,3 +261,63 @@ class DatabaseClient:
             reel_id=reel_db_id,
             topics_count=len(visual_topics),
         )
+
+    async def upsert_content_intelligence(
+        self,
+        reel_db_id: str,
+        topic: str | None = None,
+        hook_type: str | None = None,
+        hook_text: str | None = None,
+        cta: str | None = None,
+        content_format: str | None = None,
+        teaching_style: str | None = None,
+        narrative_style: str | None = None,
+        audience_intent: str | None = None,
+        sentiment: str | None = None,
+        visual_style: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "ContentIntelligence" (
+                    "reelId", "topic", "hookType", "hookText", "cta",
+                    "contentFormat", "teachingStyle", "narrativeStyle",
+                    "audienceIntent", "sentiment", "visualStyle"
+                ) VALUES ($1, $2, $3::"HookType", $4, $5, $6::"ContentFormat",
+                          $7, $8, $9, $10, $11)
+                ON CONFLICT ("reelId")
+                DO UPDATE SET
+                    "topic" = EXCLUDED."topic",
+                    "hookType" = EXCLUDED."hookType",
+                    "hookText" = EXCLUDED."hookText",
+                    "cta" = EXCLUDED."cta",
+                    "contentFormat" = EXCLUDED."contentFormat",
+                    "teachingStyle" = EXCLUDED."teachingStyle",
+                    "narrativeStyle" = EXCLUDED."narrativeStyle",
+                    "audienceIntent" = EXCLUDED."audienceIntent",
+                    "sentiment" = EXCLUDED."sentiment",
+                    "visualStyle" = EXCLUDED."visualStyle"
+                RETURNING "id", "reelId", "topic", "hookType"
+                """,
+                reel_db_id,
+                topic,
+                hook_type,
+                hook_text,
+                cta,
+                content_format,
+                teaching_style,
+                narrative_style,
+                audience_intent,
+                sentiment,
+                visual_style,
+            )
+            result = dict(row) if row else None
+            if result:
+                logger.debug(
+                    "content_intelligence_upserted",
+                    reel_id=reel_db_id,
+                    topic=topic,
+                )
+            return result

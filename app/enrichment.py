@@ -6,6 +6,7 @@ from typing import Any
 from app.clip.extractor import extract_visual_features
 from app.config import settings
 from app.db import DatabaseClient
+from app.intelligence import extract_intelligence
 from app.logging_setup import get_logger
 from app.ocr.extractor import extract_text_overlays_with_frames
 from app.selector import (
@@ -27,6 +28,7 @@ async def enrich_reel(
     audio_bytes: bytes | None = None,
     frames: list[Any] | None = None,
     ocr_frame_texts: list[list[str]] | None = None,
+    caption: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "reel_id": reel_db_id,
@@ -34,6 +36,7 @@ async def enrich_reel(
         "text_overlays": None,
         "visual_features": None,
         "modality_decision": None,
+        "content_intelligence": None,
     }
 
     speech_score = 0.0
@@ -111,6 +114,50 @@ async def enrich_reel(
             result["visual_features"] = visual_data
     elif not decision.run_clip:
         logger.debug("clip_skipped_by_selector", reel=instagram_reel_id)
+
+    transcript_text = (
+        result["transcript"]["transcript"]
+        if result["transcript"]
+        else None
+    )
+    overlays_list = result["text_overlays"] or []
+    visual_topics = (
+        result["visual_features"]["visual_topics"]
+        if result["visual_features"]
+        else None
+    )
+    visual_summary = (
+        result["visual_features"]["visual_summary"]
+        if result["visual_features"]
+        else None
+    )
+
+    intelligence = extract_intelligence(
+        reel_db_id=reel_db_id,
+        transcript=transcript_text,
+        caption=caption,
+        text_overlays=overlays_list,
+        visual_topics=visual_topics,
+        visual_summary=visual_summary,
+    )
+    await db.upsert_content_intelligence(
+        reel_db_id=reel_db_id,
+        topic=intelligence.topic,
+        hook_type=intelligence.hook_type.value if intelligence.hook_type else None,
+        hook_text=intelligence.hook_text,
+        cta=intelligence.cta,
+        content_format=(
+            intelligence.content_format.value
+            if intelligence.content_format
+            else None
+        ),
+        teaching_style=intelligence.teaching_style,
+        narrative_style=intelligence.narrative_style,
+        audience_intent=intelligence.audience_intent,
+        sentiment=intelligence.sentiment,
+        visual_style=intelligence.visual_style,
+    )
+    result["content_intelligence"] = intelligence.model_dump(exclude={"reel_id"})
 
     return result
 

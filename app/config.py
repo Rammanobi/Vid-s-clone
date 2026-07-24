@@ -58,5 +58,16 @@ class Settings:
         os.environ.get("PROMETHEUS_PORT", "8001")
     )
 
+    # Modality selector thresholds
+    speech_threshold: float = float(
+        os.environ.get("SPEECH_THRESHOLD", "0.1")
+    )
+    text_threshold: float = float(
+        os.environ.get("TEXT_THRESHOLD", "0.15")
+    )
+    visual_change_threshold: float = float(
+        os.environ.get("VISUAL_CHANGE_THRESHOLD", "0.05")
+    )
+
 
 settings = Settings()

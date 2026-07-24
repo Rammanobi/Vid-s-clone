@@ -234,3 +234,30 @@ class DatabaseClient:
                 limit,
             )
             return [dict(r) for r in rows]
+
+    async def update_reel_visual_features(
+        self,
+        reel_db_id: str,
+        embedding: list[float],
+        visual_topics: list[str],
+        visual_summary: str,
+    ) -> None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE "Reel" SET '
+                '"combinedEmbedding" = $1::vector, '
+                '"visualTopics" = $2, '
+                '"visualSummary" = $3 '
+                'WHERE "id" = $4',
+                embedding,
+                visual_topics,
+                visual_summary,
+                reel_db_id,
+            )
+        logger.debug(
+            "reel_visual_features_updated",
+            reel_id=reel_db_id,
+            topics_count=len(visual_topics),
+        )

@@ -85,6 +85,39 @@ llm_request_duration_seconds = Histogram(
     buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
 )
 
+content_intelligence_runs_total = Counter(
+    "content_intelligence_runs_total",
+    "Total content intelligence pipeline runs",
+    ["status"],
+)
+
+content_intelligence_run_duration_seconds = Histogram(
+    "content_intelligence_run_duration_seconds",
+    "Content intelligence pipeline run duration in seconds",
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
+)
+
+content_intelligence_errors_total = Counter(
+    "content_intelligence_errors_total",
+    "Total content intelligence pipeline errors",
+    ["error_type"],
+)
+
+content_intelligence_last_run_timestamp = Gauge(
+    "content_intelligence_last_run_timestamp",
+    "Unix timestamp of last content intelligence pipeline run",
+)
+
+content_intelligence_last_run_duration_seconds = Gauge(
+    "content_intelligence_last_run_duration_seconds",
+    "Duration in seconds of last content intelligence pipeline run",
+)
+
+content_intelligence_reels_processed_total = Counter(
+    "content_intelligence_reels_processed_total",
+    "Total reels processed by content intelligence pipeline",
+)
+
 
 def start_metrics_server() -> None:
     try:

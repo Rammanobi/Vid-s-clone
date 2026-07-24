@@ -184,3 +184,53 @@ class DatabaseClient:
                 following_count, posts_count, is_competitor,
             )
             return dict(row) if row else None
+
+    async def update_reel_transcript(
+        self,
+        reel_db_id: str,
+        transcript: str,
+        transcript_json: list[dict[str, Any]],
+    ) -> None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE "Reel" SET "transcript" = $1, "transcriptJson" = $2::jsonb WHERE "id" = $3',
+                transcript,
+                json.dumps(transcript_json),
+                reel_db_id,
+            )
+        logger.debug("reel_transcript_updated", reel_id=reel_db_id)
+
+    async def update_reel_text_overlays(
+        self,
+        reel_db_id: str,
+        text_overlays: list[str],
+    ) -> None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE "Reel" SET "textOverlays" = $1 WHERE "id" = $2',
+                text_overlays,
+                reel_db_id,
+            )
+        logger.debug(
+            "reel_text_overlays_updated",
+            reel_id=reel_db_id,
+            count=len(text_overlays),
+        )
+
+    async def get_reels_pending_enrichment(
+        self, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT "id", "instagramReelId", "videoUrl" FROM "Reel" '
+                'WHERE "transcript" IS NULL OR "textOverlays" = \'{}\''
+                "ORDER BY \"createdAt\" ASC LIMIT $1",
+                limit,
+            )
+            return [dict(r) for r in rows]

@@ -91,5 +91,20 @@ class Settings:
         os.environ.get("CREATOR_UPDATE_INTERVAL_HOURS", "24")
     )
 
+    # Redis
+    redis_url: str = field(
+        default_factory=lambda: os.environ.get("REDIS_URL", "")
+    )
+
+    # Database pool
+    db_pool_min_size: int = int(os.environ.get("DB_POOL_MIN_SIZE", "2"))
+    db_pool_max_size: int = int(os.environ.get("DB_POOL_MAX_SIZE", "20"))
+    db_pool_max_queries: int = int(
+        os.environ.get("DB_POOL_MAX_QUERIES", "50000")
+    )
+    db_pool_max_lifetime: int = int(
+        os.environ.get("DB_POOL_MAX_LIFETIME", "3600")
+    )
+
 
 settings = Settings()

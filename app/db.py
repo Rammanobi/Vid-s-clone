@@ -9,6 +9,7 @@ from typing import Any
 import asyncpg
 
 from app.logging_setup import get_logger
+from app.pool import validate_db_url_for_neon
 
 logger = get_logger(__name__)
 
@@ -88,15 +89,35 @@ def _parse_time_range_days(time_range: str) -> int | None:
 
 
 class DatabaseClient:
-    def __init__(self, dsn: str) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        min_size: int = 2,
+        max_size: int = 20,
+        max_queries: int = 50000,
+        max_inactive_connection_lifetime: int = 3600,
+    ) -> None:
         self._dsn = dsn
+        self._min_size = min_size
+        self._max_size = max_size
+        self._max_queries = max_queries
+        self._max_inactive_connection_lifetime = max_inactive_connection_lifetime
         self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
+        validate_db_url_for_neon(self._dsn)
         self._pool = await asyncpg.create_pool(
-            self._dsn, min_size=2, max_size=10
+            self._dsn,
+            min_size=self._min_size,
+            max_size=self._max_size,
+            max_queries=self._max_queries,
+            max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
         )
-        logger.info("db_pool_created")
+        logger.info(
+            "db_pool_created",
+            min_size=self._min_size,
+            max_size=self._max_size,
+        )
 
     async def close(self) -> None:
         if self._pool:

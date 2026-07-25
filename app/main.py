@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.cache import get_redis, close_redis
 from app.config import settings
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
@@ -74,8 +75,22 @@ def create_app() -> FastAPI:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global db_client
-    db_client = DatabaseClient(settings.database_url)
+    db_client = DatabaseClient(
+        settings.database_url,
+        min_size=settings.db_pool_min_size,
+        max_size=settings.db_pool_max_size,
+        max_queries=settings.db_pool_max_queries,
+        max_inactive_connection_lifetime=settings.db_pool_max_lifetime,
+    )
     await db_client.connect()
+
+    if settings.redis_url:
+        redis_client = get_redis()
+        if redis_client:
+            logger.info("redis_initialized")
+        else:
+            logger.warning("redis_not_available")
+
     start_metrics_server()
     logger.info("app_started", environment=settings.environment)
     try:
@@ -144,6 +159,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             pass
     if db_client:
         await db_client.close()
+    await close_redis()
     logger.info("app_shutdown")
 
 

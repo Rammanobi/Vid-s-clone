@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vids-clone
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: vids-clone
+data:
+  ENVIRONMENT: "production"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  PROMETHEUS_PORT: "8001"
+  JWT_EXPIRE_MINUTES: "60"
+  RATE_LIMIT_PER_MINUTE: "120"
+  HIKER_BASE_URL: "https://api.hikerapi.com"
+  OPENAI_BASE_URL: "https://api.openai.com/v1"
+  LLM_MODEL: "gpt-4o-mini"
+  CREATOR_UPDATE_INTERVAL_HOURS: "24"
+  REDIS_URL: "redis://redis-service:6379/0"
+  DB_POOL_MIN_SIZE: "2"
+  DB_POOL_MAX_SIZE: "20"
+  DB_POOL_MAX_QUERIES: "50000"
+  DB_POOL_MAX_LIFETIME: "3600"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: vids-clone
+data:
+  NEXT_PUBLIC_API_URL: "https://api.vidsclone.com"
+  NEXT_PUBLIC_APP_URL: "https://vidsclone.com"

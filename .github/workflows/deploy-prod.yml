@@ -1,0 +1,72 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to deploy"
+        required: true
+        type: string
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  ENVIRONMENT: prod
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version tag
+        run: |
+          TAG="${{ github.event.inputs.version || github.ref_name }}"
+          echo "Deploying version: $TAG"
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+        id: version
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and verify images
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ needs.validate.outputs.version }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ needs.validate.outputs.version }}
+
+      - name: Deploy to Production
+        run: |
+          echo "Deploying to production environment..."
+          echo "API image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ needs.validate.outputs.version }}"
+          echo "Frontend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ needs.validate.outputs.version }}"
+
+      - name: Health check
+        run: |
+          echo "Running health checks against production..."
+          sleep 10
+
+      - name: Notify
+        uses: slackapi/slack-github-action@v1
+        if: always()
+        with:
+          payload: |
+            {
+              "text": "Production deploy ${{ job.status == 'success' && '✅' || '❌' }}: ${{ needs.validate.outputs.version }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

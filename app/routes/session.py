@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import get_current_user
+from app.cache import cache_delete, cache_get, cache_set
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
@@ -45,6 +46,16 @@ async def get_session(
             detail="Database not available",
         )
 
+    cache_key = f"session:{session_id}"
+    cached = await cache_get(cache_key)
+    if cached:
+        if cached.get("userId") != user:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this session",
+            )
+        return cached
+
     session = await db.get_session(session_id)
     db_queries_total.labels(operation="get_session").inc()
 
@@ -59,6 +70,8 @@ async def get_session(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this session",
         )
+
+    await cache_set(cache_key, session, ttl=300)
 
     return session
 
@@ -75,10 +88,18 @@ async def list_sessions(
             detail="Database not available",
         )
 
+    cache_key = f"sessions:list:{user}:{limit}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
     sessions = await db.get_sessions_by_user(user, limit=limit)
     db_queries_total.labels(operation="list_sessions").inc()
 
-    return {"sessions": sessions, "count": len(sessions)}
+    result = {"sessions": sessions, "count": len(sessions)}
+    await cache_set(cache_key, result, ttl=120)
+
+    return result
 
 
 @router.put("/{session_id}/summary")
@@ -108,6 +129,8 @@ async def update_session_summary(
 
     updated = await db.update_session_summary(session_id, summary)
     db_queries_total.labels(operation="update_session_summary").inc()
+
+    await cache_delete(f"session:{session_id}")
 
     return {"status": "ok", "session": updated}
 

@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
+from app.cache import get_redis
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
@@ -21,7 +22,16 @@ async def health(
 ) -> dict[str, Any]:
     db_ok = await db.health() if db is not None else False
 
-    status_code = "healthy" if db_ok else "degraded"
+    redis_ok = False
+    try:
+        r = get_redis()
+        if r is not None:
+            await r.ping()
+            redis_ok = True
+    except Exception:
+        redis_ok = False
+
+    status_code = "healthy" if db_ok and redis_ok else "degraded"
     http_requests_total.labels(
         method="GET", endpoint="/health", status=status_code
     ).inc()
@@ -29,5 +39,6 @@ async def health(
     return {
         "status": status_code,
         "database": "connected" if db_ok else "unavailable",
+        "redis": "connected" if redis_ok else "unavailable",
         "version": "1.0.0",
     }

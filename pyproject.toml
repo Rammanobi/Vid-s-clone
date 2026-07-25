@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "langgraph>=0.4,<1",
     "langchain-core>=0.3,<1",
+    "redis>=5.2,<6",
 ]
 
 [project.optional-dependencies]

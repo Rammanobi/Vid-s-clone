@@ -186,6 +186,60 @@ agent_confidence_bucket = Gauge(
     ["bucket"],
 )
 
+pipeline_runs_total = Counter(
+    "pipeline_runs_total",
+    "Total pipeline runs",
+    ["status"],
+)
+
+pipeline_run_duration_seconds = Histogram(
+    "pipeline_run_duration_seconds",
+    "Pipeline run duration in seconds",
+    ["status"],
+    buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0),
+)
+
+pipeline_stage_duration_seconds = Histogram(
+    "pipeline_stage_duration_seconds",
+    "Pipeline stage duration in seconds",
+    ["stage", "status"],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0),
+)
+
+pipeline_stage_errors_total = Counter(
+    "pipeline_stage_errors_total",
+    "Total pipeline stage errors",
+    ["stage"],
+)
+
+pipeline_stage_status = Gauge(
+    "pipeline_stage_status",
+    "Pipeline stage status (1=success, 0=failed/skipped)",
+    ["stage", "status"],
+)
+
+pipeline_last_run_timestamp = Gauge(
+    "pipeline_last_run_timestamp",
+    "Timestamp of last pipeline run",
+    ["status"],
+)
+
+pipeline_last_run_duration_seconds = Gauge(
+    "pipeline_last_run_duration_seconds",
+    "Duration of last pipeline run in seconds",
+    ["status"],
+)
+
+pipeline_scheduler_running = Gauge(
+    "pipeline_scheduler_running",
+    "Whether the pipeline scheduler is running (1=running, 0=stopped)",
+)
+
+pipeline_scheduler_consecutive_failures = Gauge(
+    "pipeline_scheduler_consecutive_failures",
+    "Consecutive pipeline scheduler failures",
+)
+
 
 def start_metrics_server() -> None:
     try:

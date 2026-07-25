@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -16,7 +17,7 @@ from app.middleware import (
     add_rate_limiting,
 )
 from app.monitoring import start_metrics_server
-from app.routes import agent, analytics, auth, content, creator, health, ingest, knowledge, session
+from app.routes import agent, analytics, auth, content, creator, health, ingest, knowledge, pipeline, session
 
 logger = get_logger(__name__)
 
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(creator.router)
     app.include_router(knowledge.router)
     app.include_router(agent.router)
+    app.include_router(pipeline.router)
 
     app.dependency_overrides[get_db_dependency] = get_db
 
@@ -91,19 +93,48 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     except Exception as exc:
         logger.warning("startup_creator_intelligence_skipped", error=str(exc))
+    pipeline_task: asyncio.Task[Any] | None = None
     try:
-        from app.scheduler import creator_update_loop
+        from app.pipeline import PipelineStage, run_pipeline
 
-        scheduler_task = asyncio.create_task(creator_update_loop(db_client))
-        logger.info("creator_update_scheduler_started")
+        logger.info("startup_pipeline_started")
+        startup_result = await run_pipeline(
+            db_client,
+            stages=[
+                PipelineStage.ENRICHMENT,
+                PipelineStage.ANALYTICS,
+                PipelineStage.INTELLIGENCE,
+                PipelineStage.KNOWLEDGE,
+                PipelineStage.AGENT,
+                PipelineStage.RETRIEVAL,
+            ],
+            enrichment_limit=10,
+            analytics_limit=50,
+            intelligence_limit=50,
+            intelligence_use_llm=False,
+            knowledge_limit=100,
+        )
+        logger.info(
+            "startup_pipeline_complete",
+            status=startup_result.status,
+            elapsed_sec=startup_result.elapsed_sec,
+            stages=[s.stage.value for s in startup_result.stages],
+        )
     except Exception as exc:
-        logger.warning("creator_update_scheduler_failed", error=str(exc))
-        scheduler_task = None
+        logger.warning("startup_pipeline_skipped", error=str(exc))
+    try:
+        from app.scheduler import creator_update_loop, pipeline_update_loop
+
+        creator_task = asyncio.create_task(creator_update_loop(db_client))
+        pipeline_task = asyncio.create_task(pipeline_update_loop(db_client))
+        logger.info("schedulers_started")
+    except Exception as exc:
+        logger.warning("schedulers_failed", error=str(exc))
     yield
-    if scheduler_task and not scheduler_task.done():
-        scheduler_task.cancel()
+    if pipeline_task and not pipeline_task.done():
+        pipeline_task.cancel()
         try:
-            await scheduler_task
+            await pipeline_task
         except asyncio.CancelledError:
             pass
     if db_client:

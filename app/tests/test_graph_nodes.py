@@ -24,9 +24,20 @@ from app.graph.nodes import (
     query_transformation_node,
     query_understanding_node,
     recommendation_generator_node,
+    reranker_node,
     retrieval_planner_node,
     set_clarification_node,
     set_decline_node,
+)
+from app.reranker import (
+    RERANKER_TOP_K,
+    _compute_reranker_score,
+    _fuse_scores,
+    _get_candidate_text,
+    compute_retrieval_confidence,
+    merge_and_dedup_candidates,
+    rerank_candidates,
+    select_top_k,
 )
 from app.graph.registry import ToolInfo, ToolRegistry, registry
 from app.graph.state import GraphState
@@ -786,6 +797,7 @@ class TestGraphRouting:
         assert "query_transformation" in node_names
         assert "retrieval_planner" in node_names
         assert "parallel_retrieval" in node_names
+        assert "reranker" in node_names
         assert "context_fusion" in node_names
         assert "confidence_evaluation" in node_names
         assert "conversational_reasoner" in node_names
@@ -827,7 +839,7 @@ class TestGraphInvocation:
         builder = build_conversation_graph()
         graph = builder.compile()
         g = graph.get_graph()
-        assert len(g.nodes) == 15
+        assert len(g.nodes) == 16
 
     async def test_high_confidence_flow_includes_recommendations(self) -> None:
         state: GraphState = {**STATE.copy(), "user_query": "analyze my content strategy"}
@@ -1170,3 +1182,208 @@ class TestRetrievalFunctions:
         assert result["reel_id"] == "r2"
         assert result["bm25_score"] == 0.75
         assert result["matched_terms"] == ["AI", "learn"]
+
+
+class TestRerankerFunctions:
+    def test_fuse_scores_both(self) -> None:
+        assert _fuse_scores(0.8, 0.6) == 0.7
+
+    def test_fuse_scores_only_dense(self) -> None:
+        assert _fuse_scores(0.8, None) == 0.8
+
+    def test_fuse_scores_only_sparse(self) -> None:
+        assert _fuse_scores(None, 0.6) == 0.6
+
+    def test_fuse_scores_none(self) -> None:
+        assert _fuse_scores(None, None) == 0.0
+
+    def test_merge_dedup_merges_and_deduplicates(self) -> None:
+        docs = [
+            {"source": "hybrid_search", "data": {"reel_id": "r1", "retrieval_score": 0.9, "contexts": ["a"], "caption": "hello"}},
+            {"source": "hybrid_search", "data": {"reel_id": "r2", "bm25_score": 0.7, "contexts": ["b"], "caption": "world"}},
+            {"source": "hybrid_search", "data": {"reel_id": "r1", "retrieval_score": 0.8, "contexts": ["c"], "caption": "hello"}},
+        ]
+        result = merge_and_dedup_candidates(docs)
+        assert len(result) == 2
+        ids = [c["reel_id"] for c in result]
+        assert ids == ["r1", "r2"]
+
+    def test_merge_dedup_sort_by_fused(self) -> None:
+        docs = [
+            {"source": "hybrid_search", "data": {"reel_id": "r2", "bm25_score": 0.9, "contexts": []}},
+            {"source": "hybrid_search", "data": {"reel_id": "r1", "retrieval_score": 0.9, "contexts": []}},
+        ]
+        result = merge_and_dedup_candidates(docs)
+        assert result[0]["reel_id"] == "r2"
+        assert result[1]["reel_id"] == "r1"
+
+    def test_merge_dedup_empty(self) -> None:
+        assert merge_and_dedup_candidates([]) == []
+
+    def test_rerank_orders_by_score(self) -> None:
+        candidates = [
+            {"reel_id": "r1", "fused_score": 0.5, "caption": "AI tutorial for beginners", "contexts": []},
+            {"reel_id": "r2", "fused_score": 0.3, "caption": "cooking pasta", "contexts": []},
+        ]
+        result = rerank_candidates(candidates, "AI tutorial")
+        assert result[0]["reel_id"] == "r1"
+        assert result[1]["reel_id"] == "r2"
+        assert result[0]["reranker_score"] > result[1]["reranker_score"]
+
+    def test_rerank_empty_query(self) -> None:
+        candidates = [{"reel_id": "r1", "fused_score": 0.5, "caption": "test", "contexts": []}]
+        result = rerank_candidates(candidates, "")
+        assert result == candidates
+
+    def test_rerank_empty_candidates(self) -> None:
+        assert rerank_candidates([], "query") == []
+
+    def test_select_top_k_respects_k(self) -> None:
+        candidates = [{"reel_id": f"r{i}"} for i in range(20)]
+        result = select_top_k(candidates, k=5)
+        assert len(result) == 5
+
+    def test_select_top_k_default(self) -> None:
+        candidates = [{"reel_id": f"r{i}"} for i in range(20)]
+        result = select_top_k(candidates)
+        assert len(result) == RERANKER_TOP_K
+
+    def test_select_top_k_less_than_k(self) -> None:
+        candidates = [{"reel_id": f"r{i}"} for i in range(3)]
+        result = select_top_k(candidates, k=10)
+        assert len(result) == 3
+
+    def test_compute_retrieval_confidence_full(self) -> None:
+        candidates = [
+            {"reel_id": "r1", "retrieval_score": 0.9, "reranker_score": 0.8, "bm25_score": 0.7, "caption": "AI tutorial for beginners machine learning", "contexts": []},
+            {"reel_id": "r2", "retrieval_score": 0.7, "reranker_score": 0.6, "bm25_score": 0.5, "caption": "deep learning explained", "contexts": []},
+        ]
+        result = compute_retrieval_confidence(candidates, "AI tutorial for beginners")
+        assert result["retrieval_score"] == 0.9
+        assert result["reranker_score"] == 0.8
+        assert result["coverage_score"] > 0
+        assert result["combined_score"] > 0
+        assert result["combined_score"] <= 1.0
+
+    def test_compute_retrieval_confidence_empty(self) -> None:
+        result = compute_retrieval_confidence([], "")
+        assert result["retrieval_score"] == 0.0
+        assert result["reranker_score"] == 0.0
+        assert result["coverage_score"] == 0.0
+        assert result["combined_score"] == 0.0
+
+    def test_get_candidate_text_combines_sources(self) -> None:
+        cand = {
+            "caption": "Hello world",
+            "topic": "AI",
+            "hook_text": "Amazing",
+            "contexts": ["context1"],
+        }
+        text = _get_candidate_text(cand)
+        assert "hello" in text
+        assert "world" in text
+        assert "ai" in text
+        assert "amazing" in text
+        assert "context1" in text
+
+
+class TestRerankerNode:
+    async def test_reranker_empty(self) -> None:
+        state: GraphState = {
+            "session_id": "s1",
+            "user_query": "test",
+            "rewritten_query": None,
+            "retrieved_documents": [],
+        }
+        result = await reranker_node(state, {})
+        assert result["ranked_context"] == {}
+        assert result.get("confidence_score", 0.0) == 0.0
+
+    async def test_reranker_merges_and_reranks(self) -> None:
+        state: GraphState = {
+            "session_id": "s1",
+            "user_query": "AI tutorial",
+            "rewritten_query": "latest AI tutorial",
+            "retrieved_documents": [
+                {"source": "hybrid_search", "data": {"reel_id": "r1", "retrieval_score": 0.9, "caption": "AI tutorial", "contexts": ["AI"]}},
+                {"source": "hybrid_search", "data": {"reel_id": "r2", "bm25_score": 0.7, "caption": "cooking", "contexts": ["food"]}},
+            ],
+        }
+        result = await reranker_node(state, {})
+        assert "ranked_context" in result
+        rc = result["ranked_context"]
+        assert "reranked_candidates" in rc
+        assert len(rc["reranked_candidates"]) == 2
+        assert rc["reranker_top_k"] == RERANKER_TOP_K
+        assert "retrieval_confidence" in rc
+        assert result["confidence_score"] > 0
+
+    async def test_reranker_preserves_previous_confidence(self) -> None:
+        state: GraphState = {
+            "session_id": "s1",
+            "user_query": "AI tutorial",
+            "rewritten_query": None,
+            "retrieved_documents": [
+                {"source": "hybrid_search", "data": {"reel_id": "r1", "retrieval_score": 0.9, "caption": "AI tutorial for beginners", "contexts": ["AI"]}},
+            ],
+            "confidence_score": 0.95,
+        }
+        result = await reranker_node(state, {})
+        assert result["confidence_score"] == 0.95
+
+    async def test_reranker_reranked_order(self) -> None:
+        state: GraphState = {
+            "session_id": "s1",
+            "user_query": "AI tutorial",
+            "rewritten_query": None,
+            "retrieved_documents": [
+                {"source": "hybrid_search", "data": {"reel_id": "r2", "bm25_score": 0.9, "caption": "cooking pasta", "contexts": []}},
+                {"source": "hybrid_search", "data": {"reel_id": "r1", "retrieval_score": 0.9, "caption": "AI tutorial for beginners", "contexts": []}},
+            ],
+        }
+        result = await reranker_node(state, {})
+        rc = result["ranked_context"]
+        candidates = rc["reranked_candidates"]
+        assert candidates[0]["reel_id"] == "r1"
+        assert candidates[1]["reel_id"] == "r2"
+        assert candidates[0]["reranker_score"] > candidates[1]["reranker_score"]
+
+
+class TestGraphWithReranker:
+    async def test_graph_includes_reranker(self) -> None:
+        g = compiled_graph.get_graph()
+        node_names = list(g.nodes.keys())
+        assert "reranker" in node_names
+
+    async def test_reranker_position_in_pipeline(self) -> None:
+        g = compiled_graph.get_graph()
+        node_names = list(g.nodes.keys())
+        reranker_idx = node_names.index("reranker")
+        parallel_idx = node_names.index("parallel_retrieval")
+        context_idx = node_names.index("context_fusion")
+        assert parallel_idx < reranker_idx < context_idx
+
+    async def test_e2e_with_reranker(self) -> None:
+        state: GraphState = {**STATE.copy()}
+        db = AsyncMock()
+        db.get_session = AsyncMock(return_value={"id": "s1", "summary": ""})
+        db.get_chat_messages = AsyncMock(return_value=[])
+        db.get_creator_profile = AsyncMock(return_value=None)
+        db.get_reels_with_metrics = AsyncMock(return_value=[])
+        db.get_competitor_insights_by_niche = AsyncMock(return_value=[])
+        db.get_trends_by_topic = AsyncMock(return_value=[])
+        db.search_reels_hybrid = AsyncMock(
+            return_value=[{"reel_id": "r1", "retrieval_score": 0.85, "contexts": ["AI content analysis"]}]
+        )
+        db.get_reels_with_full_intelligence = AsyncMock(return_value=[])
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+
+        result = await compiled_graph.ainvoke(
+            state,
+            {"configurable": {"db": db, "llm": None}},
+        )
+        rc = result.get("ranked_context") or {}
+        assert "retrieval_confidence" in rc
+        assert "reranked_candidates" in rc
+        assert rc["reranker_top_k"] == RERANKER_TOP_K
+        assert result["confidence_score"] is not None

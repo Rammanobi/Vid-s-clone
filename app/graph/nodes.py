@@ -11,6 +11,13 @@ from app.graph.state import GraphState
 from app.graph.tools import get_conversation_memory
 from app.llm import LLMClient
 from app.logging_setup import get_logger
+from app.reranker import (
+    RERANKER_TOP_K,
+    compute_retrieval_confidence,
+    merge_and_dedup_candidates,
+    rerank_candidates,
+    select_top_k,
+)
 
 logger = get_logger(__name__)
 
@@ -336,6 +343,40 @@ async def parallel_retrieval_node(
     }
 
 
+async def reranker_node(
+    state: GraphState,
+    config: RunnableConfig,
+) -> dict[str, Any]:
+    retrieved_documents = state.get("retrieved_documents") or []
+    rewritten_query = (state.get("rewritten_query") or "").strip()
+    user_query = (state.get("user_query") or "").strip()
+    query = rewritten_query or user_query or ""
+
+    if not retrieved_documents:
+        return {"ranked_context": state.get("ranked_context") or {}}
+
+    candidates = merge_and_dedup_candidates(retrieved_documents)
+    reranked = rerank_candidates(candidates, query)
+    top_k = select_top_k(reranked, k=RERANKER_TOP_K)
+
+    ranked_context = state.get("ranked_context") or {}
+    ranked_context["reranked_candidates"] = top_k
+    ranked_context["reranker_top_k"] = RERANKER_TOP_K
+
+    retrieval_confidence = compute_retrieval_confidence(top_k, query)
+    ranked_context["retrieval_confidence"] = retrieval_confidence
+
+    combined = retrieval_confidence.get("combined_score", 0.0)
+    current = state.get("confidence_score") or 0.0
+    new_confidence = max(combined, current)
+    new_confidence = round(min(new_confidence, 1.0), 4)
+
+    return {
+        "ranked_context": ranked_context,
+        "confidence_score": new_confidence,
+    }
+
+
 async def context_fusion_node(
     state: GraphState,
     config: RunnableConfig,
@@ -344,6 +385,7 @@ async def context_fusion_node(
     analytics_context = state.get("analytics_context")
     competitor_context = state.get("competitor_context")
     retrieved_documents = state.get("retrieved_documents") or []
+    prev_ranked = state.get("ranked_context") or {}
 
     ranked_context: dict[str, Any] = {}
 
@@ -359,7 +401,7 @@ async def context_fusion_node(
     similar_reels = [
         doc["data"]
         for doc in retrieved_documents
-        if doc.get("source") == "hybrid_search"
+        if doc.get("source") in ("hybrid_search", "reranker")
     ]
     if similar_reels:
         ranked_context["similar_reels"] = similar_reels[:5]
@@ -371,6 +413,15 @@ async def context_fusion_node(
     ]
     if trends:
         ranked_context["trend_summary"] = trends[:5]
+
+    retrieval_confidence = prev_ranked.get("retrieval_confidence")
+    if retrieval_confidence:
+        ranked_context["retrieval_confidence"] = retrieval_confidence
+
+    reranked_candidates = prev_ranked.get("reranked_candidates")
+    if reranked_candidates:
+        ranked_context["reranked_candidates"] = reranked_candidates
+        ranked_context["reranker_top_k"] = prev_ranked.get("reranker_top_k", RERANKER_TOP_K)
 
     ranked_context["source_count"] = len(ranked_context)
     ranked_context["total_documents"] = len(retrieved_documents)
@@ -390,21 +441,27 @@ async def confidence_evaluation_node(
     source_count = ranked_context.get("source_count", 0)
     total_documents = ranked_context.get("total_documents", 0)
 
+    retrieval_confidence = ranked_context.get("retrieval_confidence") or {}
+
     score = 0.0
 
-    if source_count >= 3:
-        score += 0.4
-    elif source_count >= 2:
-        score += 0.25
-    elif source_count >= 1:
-        score += 0.1
+    retrieval_combined = retrieval_confidence.get("combined_score")
+    if retrieval_combined is not None and retrieval_combined > 0:
+        score += retrieval_combined * 0.5
+    else:
+        if source_count >= 3:
+            score += 0.4
+        elif source_count >= 2:
+            score += 0.25
+        elif source_count >= 1:
+            score += 0.1
 
-    if total_documents >= 10:
-        score += 0.3
-    elif total_documents >= 5:
-        score += 0.2
-    elif total_documents >= 1:
-        score += 0.1
+        if total_documents >= 10:
+            score += 0.3
+        elif total_documents >= 5:
+            score += 0.2
+        elif total_documents >= 1:
+            score += 0.1
 
     if ranked_context.get("analytics"):
         score += 0.15
@@ -418,6 +475,7 @@ async def confidence_evaluation_node(
         score=confidence_score,
         source_count=source_count,
         total_documents=total_documents,
+        retrieval_confidence=retrieval_combined,
     )
     return {"confidence_score": confidence_score}
 

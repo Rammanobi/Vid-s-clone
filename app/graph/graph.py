@@ -15,6 +15,7 @@ from app.graph.nodes import (
     query_transformation_node,
     query_understanding_node,
     recommendation_generator_node,
+    reranker_node,
     retrieval_planner_node,
     set_clarification_node,
     set_decline_node,
@@ -29,6 +30,7 @@ NODE_QUERY_UNDERSTANDING = "query_understanding"
 NODE_QUERY_TRANSFORMATION = "query_transformation"
 NODE_RETRIEVAL_PLANNER = "retrieval_planner"
 NODE_PARALLEL_RETRIEVAL = "parallel_retrieval"
+NODE_RERANKER = "reranker"
 NODE_CONTEXT_FUSION = "context_fusion"
 NODE_CONFIDENCE_EVALUATION = "confidence_evaluation"
 NODE_CONVERSATIONAL_REASONER = "conversational_reasoner"
@@ -67,6 +69,7 @@ def build_conversation_graph() -> StateGraph:
     builder.add_node(NODE_QUERY_TRANSFORMATION, query_transformation_node)
     builder.add_node(NODE_RETRIEVAL_PLANNER, retrieval_planner_node)
     builder.add_node(NODE_PARALLEL_RETRIEVAL, parallel_retrieval_node)
+    builder.add_node(NODE_RERANKER, reranker_node)
     builder.add_node(NODE_CONTEXT_FUSION, context_fusion_node)
     builder.add_node(NODE_CONFIDENCE_EVALUATION, confidence_evaluation_node)
     builder.add_node(NODE_CONVERSATIONAL_REASONER, conversational_reasoner_node)
@@ -82,7 +85,8 @@ def build_conversation_graph() -> StateGraph:
     builder.add_edge(NODE_QUERY_UNDERSTANDING, NODE_QUERY_TRANSFORMATION)
     builder.add_edge(NODE_QUERY_TRANSFORMATION, NODE_RETRIEVAL_PLANNER)
     builder.add_edge(NODE_RETRIEVAL_PLANNER, NODE_PARALLEL_RETRIEVAL)
-    builder.add_edge(NODE_PARALLEL_RETRIEVAL, NODE_CONTEXT_FUSION)
+    builder.add_edge(NODE_PARALLEL_RETRIEVAL, NODE_RERANKER)
+    builder.add_edge(NODE_RERANKER, NODE_CONTEXT_FUSION)
     builder.add_edge(NODE_CONTEXT_FUSION, NODE_CONFIDENCE_EVALUATION)
 
     builder.add_conditional_edges(

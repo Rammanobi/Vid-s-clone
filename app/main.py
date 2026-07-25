@@ -15,7 +15,7 @@ from app.middleware import (
     add_rate_limiting,
 )
 from app.monitoring import start_metrics_server
-from app.routes import analytics, auth, content, creator, health, ingest, knowledge, session
+from app.routes import agent, analytics, auth, content, creator, health, ingest, knowledge, session
 
 logger = get_logger(__name__)
 
@@ -56,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(content.router)
     app.include_router(creator.router)
     app.include_router(knowledge.router)
+    app.include_router(agent.router)
 
     app.dependency_overrides[lambda: None] = get_db
 

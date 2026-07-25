@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
@@ -35,7 +35,7 @@ async def pipeline_health(
 
 @router.post("/run", status_code=202)
 async def trigger_pipeline(
-    stages: list[str] | None = None,
+    stages: list[str] | None = Query(None),
     db: Any = Depends(get_db_dependency),
 ) -> dict[str, Any]:
     stage_enums = None

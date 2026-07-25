@@ -12,9 +12,12 @@ from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import configure_logging, get_logger
 from app.middleware import (
+    AuditLogMiddleware,
     HTTPSEnforcementMiddleware,
+    InputValidationMiddleware,
+    RequestIDMiddleware,
     RequestLoggingMiddleware,
-    add_rate_limiting,
+    SecurityHeadersMiddleware,
 )
 from app.monitoring import start_metrics_server
 from app.routes import agent, analytics, auth, content, creator, health, ingest, knowledge, pipeline, session
@@ -45,10 +48,12 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestIDMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(InputValidationMiddleware)
+    app.add_middleware(AuditLogMiddleware)
     app.add_middleware(HTTPSEnforcementMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
-
-    add_rate_limiting(app)
 
     app.include_router(health.router)
     app.include_router(auth.router)

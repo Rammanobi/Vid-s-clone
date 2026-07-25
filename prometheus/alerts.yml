@@ -1,0 +1,84 @@
+groups:
+  - name: vids-clone-pipeline
+    interval: 30s
+    rules:
+      - alert: HighHttpErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx error rate > 5% for 2 minutes"
+          description: "Error rate is {{ $value | humanizePercentage }}"
+
+      - alert: AgentInvocationErrors
+        expr: rate(agent_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent invocation errors > 0.1/s for 2 minutes"
+          description: "Agent error rate is {{ $value }} errors/sec"
+
+      - alert: PipelineStageErrors
+        expr: rate(pipeline_stage_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pipeline stage errors detected"
+          description: "Pipeline stage {{ $labels.stage }} has errors"
+
+      - alert: SchedulerNotRunning
+        expr: knowledge_scheduler_running == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Knowledge scheduler is not running"
+          description: "The knowledge scheduler gauge has been 0 for over 1 minute"
+
+      - alert: PipelineSchedulerNotRunning
+        expr: pipeline_scheduler_running == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pipeline scheduler is not running"
+          description: "The pipeline scheduler gauge has been 0 for over 1 minute"
+
+      - alert: ExcessiveSchedulerFailures
+        expr: knowledge_consecutive_failures >= 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Knowledge scheduler has 3+ consecutive failures"
+          description: "Consecutive failures: {{ $value }}"
+
+      - alert: ExcessivePipelineFailures
+        expr: pipeline_scheduler_consecutive_failures >= 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pipeline scheduler has 3+ consecutive failures"
+          description: "Consecutive failures: {{ $value }}"
+
+      - alert: HighLLMLatency
+        expr: histogram_quantile(0.99, rate(llm_request_duration_seconds_bucket[5m])) > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM p99 latency > 30s for 2 minutes"
+          description: "LLM p99 latency is {{ $value }}s"
+
+      - alert: LowAgentConfidence
+        expr: agent_confidence_bucket{bucket="low"} == 1
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Agent confidence in low bucket"
+          description: "Last agent invocation had low confidence"

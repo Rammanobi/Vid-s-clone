@@ -1,0 +1,27 @@
+[run]
+source = app
+omit =
+    app/tests/*
+    app/clip/*
+    app/ocr/*
+    app/transcription/*
+    hiker_ingestion/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == "__main__":
+    raise NotImplementedError
+    logger.warning
+    logger.error
+    logger.debug
+    logger.info
+    pass
+    def __repr__
+    def __str__
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml

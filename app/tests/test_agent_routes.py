@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import status
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, WSGITransport
 
 from app.auth import get_current_user
 from app.deps import get_db_dependency
@@ -199,6 +199,69 @@ class TestAgentGraphEndpoint:
         assert "confidence_evaluation" in body["nodes"]
         assert "set_decline" in body["nodes"]
         assert "set_clarification" in body["nodes"]
+
+
+class TestAgentWebSocket:
+    async def test_websocket_chat_success(self) -> None:
+        if not __import__("os").environ.get("JWT_SECRET"):
+            pytest.skip("JWT_SECRET not configured")
+        from app.config import settings
+        if not settings.jwt_secret:
+            pytest.skip("JWT_SECRET not configured")
+
+        from fastapi.testclient import TestClient
+
+        db = AsyncMock()
+        db.get_session = AsyncMock(return_value=_make_session())
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        db.get_chat_messages = AsyncMock(return_value=[])
+        db.get_creator_profile = AsyncMock(return_value=None)
+        db.get_reels_with_metrics = AsyncMock(return_value=[])
+        db.get_competitor_insights_by_niche = AsyncMock(return_value=[])
+        db.get_trends_by_topic = AsyncMock(return_value=[])
+        db.get_reels_with_full_intelligence = AsyncMock(return_value=[])
+        db.search_reels_hybrid = AsyncMock(return_value=[])
+
+        db_override_was = app.dependency_overrides.get(get_db_dependency)
+        app.dependency_overrides[get_db_dependency] = lambda: db
+
+        from app.auth import create_access_token
+        token = create_access_token(subject="testuser")
+
+        client = TestClient(app)
+        with client.websocket_connect(f"/agent/ws?token={token}") as ws:
+            ws.send_json({"session_id": "session-1", "message": "analyze my content strategy", "token": token})
+            data = ws.receive_json()
+            assert data["event"] in ("start", "complete", "error")
+
+        app.dependency_overrides.pop(get_db_dependency, None)
+        if db_override_was is not None:
+            app.dependency_overrides[get_db_dependency] = db_override_was
+
+    async def test_websocket_auth_failure(self) -> None:
+        if not __import__("os").environ.get("JWT_SECRET"):
+            pytest.skip("JWT_SECRET not configured")
+        from app.config import settings
+        if not settings.jwt_secret:
+            pytest.skip("JWT_SECRET not configured")
+
+        from fastapi.testclient import TestClient
+
+        db_override_was = app.dependency_overrides.get(get_db_dependency)
+        db = AsyncMock()
+        db.get_session = AsyncMock(return_value={"id": "s1", "userId": "testuser"})
+        app.dependency_overrides[get_db_dependency] = lambda: db
+
+        client = TestClient(app)
+        with client.websocket_connect("/agent/ws?token=invalid") as ws:
+            data = ws.receive_json()
+            assert data["event"] == "error"
+            assert "auth" in data.get("detail", "").lower() or "Authentication" in data.get("detail", "")
+
+        app.dependency_overrides.pop(get_db_dependency, None)
+        if db_override_was is not None:
+            app.dependency_overrides[get_db_dependency] = db_override_was
 
 
 class TestAgentMetrics:

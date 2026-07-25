@@ -609,6 +609,41 @@ async def citation_builder_node(
     return {"citations": citations}
 
 
+PREFERENCE_KEYWORDS: dict[str, str] = {
+    "topic": ("topic", "topics", "content about", "niche"),
+    "hook_type": ("hook", "hooks", "hook type"),
+    "format": ("format", "tutorial", "talking head", "behind the scenes"),
+    "posting_day": ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"),
+}
+
+ACCEPT_KEYWORDS = ("yes", "great", "love", "perfect", "thanks", "good idea", "trying", "post")
+REJECT_KEYWORDS = ("no", "not", "don't", "bad", "wrong", "dislike", "hate", "different")
+
+
+def _extract_preferences(query: str) -> dict[str, str]:
+    query_lower = query.lower()
+    prefs: dict[str, str] = {}
+    for key, keywords in PREFERENCE_KEYWORDS.items():
+        for kw in keywords:
+            if kw in query_lower:
+                prefs[key] = kw
+                break
+    return prefs
+
+
+def _detect_recommendation_feedback(
+    query: str,
+    response: str | None,
+) -> str | None:
+    query_lower = query.lower()
+    if has_recommendations := "**Recommendations:**" in (response or ""):
+        if any(akw in query_lower for akw in ACCEPT_KEYWORDS):
+            return "accepted"
+        if any(rkw in query_lower for rkw in REJECT_KEYWORDS):
+            return "rejected"
+    return None
+
+
 async def memory_update_node(
     state: GraphState,
     config: RunnableConfig,
@@ -619,6 +654,26 @@ async def memory_update_node(
     response = state.get("response")
     citations = state.get("citations")
     conversation_memory = state.get("conversation_memory") or {}
+
+    preferences = _extract_preferences(user_query)
+    feedback = _detect_recommendation_feedback(user_query, response)
+
+    stored_preferences = dict(conversation_memory.get("preferences", {}))
+    stored_preferences.update(preferences)
+
+    rec_history: list[dict[str, str]] = list(conversation_memory.get("recommendation_history", []))
+    if feedback and "**Recommendations:**" in (response or ""):
+        rec_history.append({
+            "response_snippet": (response or "")[:200],
+            "feedback": feedback,
+        })
+
+    new_summary = _build_summary(
+        conversation_memory.get("summary", ""),
+        user_query,
+        response or "",
+        preferences,
+    )
 
     if session_id:
         try:
@@ -634,17 +689,47 @@ async def memory_update_node(
                     content=response,
                     citations=citations,
                 )
+            if new_summary != conversation_memory.get("summary"):
+                await db.update_session_summary(session_id, new_summary)
             logger.debug("memory_updated", session_id=session_id)
         except Exception as exc:
             logger.warning("memory_update_failed", error=str(exc))
 
     history = conversation_memory.get("messages", [])
-    updated_memory = {
+    updated_memory: dict[str, Any] = {
         **conversation_memory,
         "message_count": len(history) + 2,
+        "preferences": stored_preferences,
+        "summary": new_summary,
     }
+    if rec_history:
+        updated_memory["recommendation_history"] = rec_history
 
     return {"conversation_memory": updated_memory}
+
+
+def _build_summary(
+    existing_summary: str,
+    user_query: str,
+    response: str,
+    preferences: dict[str, str],
+) -> str:
+    parts: list[str] = []
+    if existing_summary:
+        parts.append(existing_summary.rstrip("."))
+    topic = preferences.get("topic") or ""
+    hook = preferences.get("hook_type") or ""
+    if topic or hook:
+        prefs = [f"interests: {topic}"] if topic else []
+        if hook:
+            prefs.append(f"hook: {hook}")
+        parts.append(" | ".join(prefs))
+    parts.append(f"Q: {user_query[:100]}")
+    response_preview = response[:150] if response else ""
+    if response_preview:
+        parts.append(f"A: {response_preview}")
+    combined = "; ".join(parts)
+    return combined[:1000]
 
 
 def _summarize_context(context: dict[str, Any]) -> str:

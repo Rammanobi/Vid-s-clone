@@ -161,6 +161,31 @@ knowledge_consecutive_failures = Gauge(
     "Number of consecutive failure cycles in the knowledge scheduler",
 )
 
+agent_invocations_total = Counter(
+    "agent_invocations_total",
+    "Total LangGraph agent invocations",
+    ["mode"],
+)
+
+agent_invocation_duration_seconds = Histogram(
+    "agent_invocation_duration_seconds",
+    "LangGraph agent invocation duration in seconds",
+    ["mode"],
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+)
+
+agent_errors_total = Counter(
+    "agent_errors_total",
+    "Total LangGraph agent invocation errors",
+    ["mode"],
+)
+
+agent_confidence_bucket = Gauge(
+    "agent_confidence_bucket",
+    "Confidence score bucket for last agent invocation",
+    ["bucket"],
+)
+
 
 def start_metrics_server() -> None:
     try:

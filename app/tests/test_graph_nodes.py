@@ -619,6 +619,7 @@ class TestMemoryUpdateNode:
                 {"id": "msg2"},
             ]
         )
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
         state: GraphState = {
             **STATE,
             "response": "test response",
@@ -649,6 +650,96 @@ class TestMemoryUpdateNode:
         }
         result = await memory_update_node(state, _make_config(db=db))
         assert result["conversation_memory"]["message_count"] == 2
+
+    async def test_extracts_preferences(self) -> None:
+        db = AsyncMock()
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        state: GraphState = {
+            **STATE,
+            "user_query": "I love AI topic and curiosity hooks",
+            "response": "analysis with recommendations",
+            "conversation_memory": {"messages": []},
+        }
+        result = await memory_update_node(state, _make_config(db=db))
+        prefs = result["conversation_memory"]["preferences"]
+        assert "topic" in prefs
+        assert "hook_type" in prefs
+
+    async def test_tracks_recommendation_feedback(self) -> None:
+        db = AsyncMock()
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        state: GraphState = {
+            **STATE,
+            "user_query": "yes that's great, I'll try that",
+            "response": "base text\n\n**Recommendations:**\n- try hook A",
+            "conversation_memory": {"messages": []},
+        }
+        result = await memory_update_node(state, _make_config(db=db))
+        history = result["conversation_memory"].get("recommendation_history", [])
+        assert len(history) == 1
+        assert history[0]["feedback"] == "accepted"
+
+    async def test_tracks_recommendation_rejection(self) -> None:
+        db = AsyncMock()
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        state: GraphState = {
+            **STATE,
+            "user_query": "no, that's not what I want",
+            "response": "base\n\n**Recommendations:**\n- try this",
+            "conversation_memory": {"messages": []},
+        }
+        result = await memory_update_node(state, _make_config(db=db))
+        history = result["conversation_memory"].get("recommendation_history", [])
+        assert len(history) == 1
+        assert history[0]["feedback"] == "rejected"
+
+    async def test_updates_session_summary(self) -> None:
+        db = AsyncMock()
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        state: GraphState = {
+            **STATE,
+            "user_query": "show me AI tutorial hooks",
+            "response": "Your best hook is curiosity.",
+            "conversation_memory": {"messages": [], "summary": "Initial summary"},
+        }
+        result = await memory_update_node(state, _make_config(db=db))
+        summary = result["conversation_memory"]["summary"]
+        assert "AI" in summary
+        assert db.update_session_summary.called
+
+    async def test_preserves_existing_preferences(self) -> None:
+        db = AsyncMock()
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        state: GraphState = {
+            **STATE,
+            "user_query": "show me more tutorials",
+            "conversation_memory": {
+                "messages": [],
+                "preferences": {"topic": "AI", "format": "tutorial"},
+            },
+        }
+        result = await memory_update_node(state, _make_config(db=db))
+        prefs = result["conversation_memory"]["preferences"]
+        assert prefs["topic"] == "AI"
+        assert prefs["format"] == "tutorial"
+
+    async def test_no_feedback_without_recommendations(self) -> None:
+        db = AsyncMock()
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+        db.update_session_summary = AsyncMock(return_value={"id": "s1"})
+        state: GraphState = {
+            **STATE,
+            "user_query": "yes that's good",
+            "response": "plain answer without recommendations section",
+            "conversation_memory": {"messages": []},
+        }
+        result = await memory_update_node(state, _make_config(db=db))
+        assert "recommendation_history" not in result["conversation_memory"]
 
 
 class TestGraphRouting:

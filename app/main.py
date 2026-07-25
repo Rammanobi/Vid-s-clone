@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.logging_setup import configure_logging, get_logger
 from app.middleware import (
     HTTPSEnforcementMiddleware,
@@ -58,7 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge.router)
     app.include_router(agent.router)
 
-    app.dependency_overrides[lambda: None] = get_db
+    app.dependency_overrides[get_db_dependency] = get_db
 
     return app
 

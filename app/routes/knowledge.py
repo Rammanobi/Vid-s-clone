@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.logging_setup import get_logger
 from app.monitoring import (
     creator_intelligence_errors_total,
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 @router.get("/health")
 async def knowledge_health(
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
 ) -> dict[str, Any]:
     db_ok = await db.health() if db is not None else False
     reel_count = await db.get_reel_count() if db_ok else 0

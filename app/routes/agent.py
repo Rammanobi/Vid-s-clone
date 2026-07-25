@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+import time
+from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.graph.graph import compiled_graph
 from app.graph.state import GraphState
 from app.logging_setup import get_logger
-from app.monitoring import db_queries_total
+from app.monitoring import (
+    agent_confidence_bucket,
+    agent_errors_total,
+    agent_invocation_duration_seconds,
+    agent_invocations_total,
+    db_queries_total,
+)
 from app.llm import LLMClient
 
 logger = get_logger(__name__)
@@ -23,43 +33,26 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class CitationItem(BaseModel):
+    source: str
+    type: str
+    summary: str
+
+
 class ChatResponse(BaseModel):
     session_id: str
     response: str
-    citations: list[dict[str, Any]] = []
+    citations: list[CitationItem] = []
     confidence_score: float | None = None
     intent: dict[str, Any] | None = None
+    evidence: dict[str, Any] | None = None
+    elapsed_sec: float | None = None
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def agent_chat(
-    body: ChatRequest,
-    db: DatabaseClient = Depends(lambda: None),
-    user: str = Depends(get_current_user),
-) -> ChatResponse:
-    if db is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database not available",
-        )
-
-    session = await db.get_session(body.session_id)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-    if session.get("userId") != user:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this session",
-        )
-
-    db_queries_total.labels(operation="agent_chat").inc()
-
-    initial_state: GraphState = {
-        "session_id": body.session_id,
-        "user_query": body.message,
+def _build_initial_state(session_id: str, message: str) -> GraphState:
+    return {
+        "session_id": session_id,
+        "user_query": message,
         "rewritten_query": None,
         "intent": None,
         "metadata_filters": None,
@@ -76,27 +69,190 @@ async def agent_chat(
         "conversation_memory": None,
     }
 
-    llm = LLMClient()
+
+async def _invoke_graph(
+    session_id: str,
+    message: str,
+    db: DatabaseClient,
+    llm: LLMClient | None,
+) -> dict[str, Any]:
+    start = time.monotonic()
+    initial = _build_initial_state(session_id, message)
 
     try:
         result = await compiled_graph.ainvoke(
-            initial_state,
+            initial,
             {"configurable": {"db": db, "llm": llm}},
         )
-    except Exception as exc:
-        logger.error("graph_invocation_failed", error=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process message",
-        )
+        elapsed = time.monotonic() - start
+        agent_invocations_total.labels(mode="sync").inc()
+        agent_invocation_duration_seconds.labels(mode="sync").observe(elapsed)
 
+        confidence = result.get("confidence_score") or 0.0
+        if confidence >= 0.8:
+            agent_confidence_bucket.labels(bucket="high").set(1)
+            agent_confidence_bucket.labels(bucket="medium").set(0)
+            agent_confidence_bucket.labels(bucket="low").set(0)
+        elif confidence >= 0.5:
+            agent_confidence_bucket.labels(bucket="high").set(0)
+            agent_confidence_bucket.labels(bucket="medium").set(1)
+            agent_confidence_bucket.labels(bucket="low").set(0)
+        else:
+            agent_confidence_bucket.labels(bucket="high").set(0)
+            agent_confidence_bucket.labels(bucket="medium").set(0)
+            agent_confidence_bucket.labels(bucket="low").set(1)
+
+        return result
+    except Exception as exc:
+        elapsed = time.monotonic() - start
+        agent_errors_total.labels(mode="sync").inc()
+        agent_invocation_duration_seconds.labels(mode="sync").observe(elapsed)
+        logger.error("graph_invocation_failed", error=str(exc), elapsed_sec=round(elapsed, 3))
+        raise
+
+
+async def _validate_session(
+    session_id: str,
+    user: str,
+    db: DatabaseClient,
+) -> dict[str, Any]:
+    session = await db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if session.get("userId") != user:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    db_queries_total.labels(operation="agent_chat").inc()
+    return session
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def agent_chat(
+    body: ChatRequest,
+    db: DatabaseClient = Depends(get_db_dependency),
+    user: str = Depends(get_current_user),
+) -> ChatResponse:
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database not available")
+
+    await _validate_session(body.session_id, user, db)
+    start = time.monotonic()
+    llm = LLMClient()
+    result = await _invoke_graph(body.session_id, body.message, db, llm)
+    elapsed = time.monotonic() - start
+
+    raw_citations = result.get("citations") or []
     return ChatResponse(
         session_id=body.session_id,
         response=result.get("response") or "",
-        citations=result.get("citations") or [],
+        citations=[CitationItem(**c) for c in raw_citations],
         confidence_score=result.get("confidence_score"),
         intent=result.get("intent"),
+        evidence=result.get("evidence"),
+        elapsed_sec=round(elapsed, 3),
     )
+
+
+@router.post("/chat/stream", response_model=None)
+async def agent_chat_stream(
+    body: ChatRequest,
+    db: DatabaseClient = Depends(get_db_dependency),
+    user: str = Depends(get_current_user),
+) -> StreamingResponse:
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    await _validate_session(body.session_id, user, db)
+
+    async def _event_stream() -> AsyncGenerator[str, None]:
+        llm = LLMClient()
+        start = time.monotonic()
+
+        yield f"data: {json.dumps({'event': 'start', 'session_id': body.session_id})}\n\n"
+
+        try:
+            result = await _invoke_graph(body.session_id, body.message, db, llm)
+            elapsed = time.monotonic() - start
+
+            raw_citations = result.get("citations") or []
+            payload = {
+                "event": "complete",
+                "session_id": body.session_id,
+                "response": result.get("response") or "",
+                "citations": [{"source": c["source"], "type": c["type"], "summary": c["summary"]} for c in raw_citations],
+                "confidence_score": result.get("confidence_score"),
+                "intent": result.get("intent"),
+                "evidence": result.get("evidence"),
+                "elapsed_sec": round(elapsed, 3),
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+        except Exception as exc:
+            logger.error("stream_chat_failed", error=str(exc))
+            yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@router.websocket("/ws")
+async def agent_websocket(
+    websocket: WebSocket,
+    db: DatabaseClient = Depends(get_db_dependency),
+):
+    await websocket.accept()
+    if db is None:
+        await websocket.send_json({"event": "error", "detail": "Database not available"})
+        await websocket.close(code=1011)
+        return
+
+    llm = LLMClient()
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            session_id = data.get("session_id", "")
+            message = data.get("message", "")
+            token = data.get("token", "")
+
+            try:
+                from app.auth import verify_token
+                payload = verify_token(token)
+                user = payload.get("sub", "")
+            except Exception:
+                await websocket.send_json({"event": "error", "detail": "Authentication failed"})
+                continue
+
+            session = await db.get_session(session_id)
+            if not session or session.get("userId") != user:
+                await websocket.send_json({"event": "error", "detail": "Session not found or unauthorized"})
+                continue
+
+            db_queries_total.labels(operation="agent_ws_chat").inc()
+            await websocket.send_json({"event": "start", "session_id": session_id})
+
+            try:
+                result = await _invoke_graph(session_id, message, db, llm)
+                raw_citations = result.get("citations") or []
+                await websocket.send_json({
+                    "event": "complete",
+                    "session_id": session_id,
+                    "response": result.get("response") or "",
+                    "citations": [{"source": c["source"], "type": c["type"], "summary": c["summary"]} for c in raw_citations],
+                    "confidence_score": result.get("confidence_score"),
+                    "intent": result.get("intent"),
+                    "evidence": result.get("evidence"),
+                })
+            except Exception as exc:
+                logger.error("ws_graph_invocation_failed", error=str(exc))
+                agent_errors_total.labels(mode="ws").inc()
+                await websocket.send_json({"event": "error", "detail": "Failed to process message"})
+
+    except WebSocketDisconnect:
+        logger.debug("websocket_disconnected")
+    except Exception as exc:
+        logger.error("websocket_error", error=str(exc))
 
 
 @router.get("/graph")

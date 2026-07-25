@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import get_current_user
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.logging_setup import get_logger
 from app.monitoring import db_queries_total
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 @router.post("")
 async def create_session(
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -35,7 +36,7 @@ async def create_session(
 @router.get("/{session_id}")
 async def get_session(
     session_id: str,
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -65,7 +66,7 @@ async def get_session(
 @router.get("")
 async def list_sessions(
     limit: int = Query(20, ge=1, le=100),
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -84,7 +85,7 @@ async def list_sessions(
 async def update_session_summary(
     session_id: str,
     summary: str,
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -117,7 +118,7 @@ async def add_chat_message(
     role: str,
     content: str,
     citations: list[dict[str, Any]] | None = None,
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -148,7 +149,7 @@ async def add_chat_message(
 async def get_chat_messages(
     session_id: str,
     limit: int = Query(100, ge=1, le=500),
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:

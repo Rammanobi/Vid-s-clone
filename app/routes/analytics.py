@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.logging_setup import get_logger
 from app.monitoring import (
     analytics_errors_total,
@@ -50,7 +51,7 @@ def record_analytics_error(error_type: str) -> None:
 
 @router.get("/health")
 async def analytics_health(
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
 ) -> dict[str, Any]:
     db_ok = await db.health() if db is not None else False
     reel_count = await db.get_reel_count() if db_ok else 0

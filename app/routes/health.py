@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.logging_setup import get_logger
 from app.monitoring import http_request_duration_seconds, http_requests_total
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 
 @router.get("")
 async def health(
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
 ) -> dict[str, Any]:
     db_ok = await db.health() if db is not None else False
 

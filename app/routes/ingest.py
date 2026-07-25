@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import get_current_user
 from app.db import DatabaseClient
+from app.deps import get_db_dependency
 from app.logging_setup import get_logger
 from app.monitoring import db_queries_total, http_request_duration_seconds, http_requests_total
 
@@ -22,7 +23,7 @@ async def ingest_account(
     following_count: int = 0,
     posts_count: int = 0,
     is_competitor: bool = False,
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -53,7 +54,7 @@ async def ingest_account(
 @router.get("/account/{username}")
 async def get_account(
     username: str,
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -79,7 +80,7 @@ async def get_account_reels(
     account_id: str,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:
@@ -97,7 +98,7 @@ async def get_account_reels(
 @router.get("/reel/{instagram_reel_id}")
 async def get_reel(
     instagram_reel_id: str,
-    db: DatabaseClient = Depends(lambda: None),
+    db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db is None:

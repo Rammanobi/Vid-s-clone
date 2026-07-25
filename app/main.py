@@ -15,7 +15,7 @@ from app.middleware import (
     add_rate_limiting,
 )
 from app.monitoring import start_metrics_server
-from app.routes import analytics, auth, content, health, ingest, session
+from app.routes import analytics, auth, content, creator, health, ingest, session
 
 logger = get_logger(__name__)
 
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(session.router)
     app.include_router(analytics.router)
     app.include_router(content.router)
+    app.include_router(creator.router)
 
     app.dependency_overrides[lambda: None] = get_db
 
@@ -77,7 +78,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     except Exception as exc:
         logger.warning("startup_snapshot_skipped", error=str(exc))
+    try:
+        from app.creator_pipeline import run_creator_intelligence_pipeline
+
+        creator_result = await run_creator_intelligence_pipeline(db_client, limit=100)
+        logger.info(
+            "startup_creator_intelligence_complete",
+            reels_analyzed=creator_result.get("reels_analyzed", 0),
+        )
+    except Exception as exc:
+        logger.warning("startup_creator_intelligence_skipped", error=str(exc))
+    try:
+        from app.scheduler import creator_update_loop
+
+        scheduler_task = asyncio.create_task(creator_update_loop(db_client))
+        logger.info("creator_update_scheduler_started")
+    except Exception as exc:
+        logger.warning("creator_update_scheduler_failed", error=str(exc))
+        scheduler_task = None
     yield
+    if scheduler_task and not scheduler_task.done():
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
     if db_client:
         await db_client.close()
     logger.info("app_shutdown")

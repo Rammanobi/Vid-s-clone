@@ -99,3 +99,29 @@ class ReelMetricSchema(BaseModel):
     view_to_follower: float = Field(default=0.0, ge=0.0)
     metric_quality: MetricQuality = MetricQuality.FULL
     is_volatile: bool = False
+
+
+class CreatorProfileSchema(BaseModel):
+    account_id: str
+    best_topics: list[str] = Field(default_factory=list)
+    worst_topics: list[str] = Field(default_factory=list)
+    best_hook_types: list[HookType] = Field(default_factory=list)
+    best_posting_day: str | None = None
+    best_duration_range: str | None = None
+    best_content_format: ContentFormat | None = None
+    audience_interests: list[str] = Field(default_factory=list)
+
+
+class CompetitorInsightSchema(BaseModel):
+    competitor_id: str
+    niche: str = Field(max_length=200)
+    winning_format: ContentFormat | None = None
+    top_topics: list[str] = Field(default_factory=list)
+    avg_virality: float = Field(default=1.0, ge=0.0)
+
+
+class TrendStoreSchema(BaseModel):
+    topic: str = Field(max_length=200)
+    hook_pattern: str | None = Field(None, max_length=500)
+    content_format: ContentFormat | None = None
+    virality_score: float = Field(default=1.0, ge=0.0)

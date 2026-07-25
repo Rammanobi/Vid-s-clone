@@ -86,5 +86,10 @@ class Settings:
     llm_max_retries: int = int(os.environ.get("LLM_MAX_RETRIES", "3"))
     llm_timeout_sec: int = int(os.environ.get("LLM_TIMEOUT_SEC", "30"))
 
+    # Creator intelligence update interval
+    creator_update_interval_hours: int = int(
+        os.environ.get("CREATOR_UPDATE_INTERVAL_HOURS", "24")
+    )
+
 
 settings = Settings()

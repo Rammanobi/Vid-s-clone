@@ -499,3 +499,200 @@ class DatabaseClient:
             raise RuntimeError("Database pool not initialized")
         async with self._pool.acquire() as conn:
             return await conn.fetchval('SELECT COUNT(*) FROM "Reel"')
+
+    async def upsert_creator_profile(
+        self,
+        account_id: str,
+        best_topics: list[str] | None = None,
+        worst_topics: list[str] | None = None,
+        best_hook_types: list[str] | None = None,
+        best_posting_day: str | None = None,
+        best_duration_range: str | None = None,
+        best_content_format: str | None = None,
+        audience_interests: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            best_hooks_pg = best_hook_types if best_hook_types else []
+            interests_pg = audience_interests if audience_interests else []
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "CreatorProfile" (
+                    "accountId", "bestTopics", "worstTopics",
+                    "bestHookTypes", "bestPostingDay", "bestDurationRange",
+                    "bestContentFormat", "audienceInterests"
+                ) VALUES ($1, $2, $3, $4::"HookType"[], $5, $6, $7::"ContentFormat", $8)
+                ON CONFLICT ("accountId")
+                DO UPDATE SET
+                    "bestTopics" = $2,
+                    "worstTopics" = $3,
+                    "bestHookTypes" = $4::"HookType"[],
+                    "bestPostingDay" = $5,
+                    "bestDurationRange" = $6,
+                    "bestContentFormat" = $7::"ContentFormat",
+                    "audienceInterests" = $8
+                RETURNING "id", "accountId", "bestTopics", "bestHookTypes"
+                """,
+                account_id,
+                best_topics or [],
+                worst_topics or [],
+                best_hooks_pg,
+                best_posting_day,
+                best_duration_range,
+                best_content_format,
+                interests_pg,
+            )
+            result = dict(row) if row else None
+            if result:
+                logger.debug(
+                    "creator_profile_upserted",
+                    account_id=account_id,
+                    best_topics_count=len(best_topics or []),
+                )
+            return result
+
+    async def get_creator_profile(
+        self,
+        account_id: str,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                'SELECT * FROM "CreatorProfile" WHERE "accountId" = $1',
+                account_id,
+            )
+            return dict(row) if row else None
+
+    async def upsert_competitor_insight(
+        self,
+        competitor_id: str,
+        niche: str,
+        winning_format: str | None = None,
+        top_topics: list[str] | None = None,
+        avg_virality: float = 1.0,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "CompetitorInsight" (
+                    "competitorId", "niche", "winningFormat",
+                    "topTopics", "avgVirality"
+                ) VALUES ($1, $2, $3::"ContentFormat", $4, $5)
+                ON CONFLICT ("competitorId", "niche")
+                DO UPDATE SET
+                    "winningFormat" = $3::"ContentFormat",
+                    "topTopics" = $4,
+                    "avgVirality" = $5
+                RETURNING "id", "competitorId", "niche", "avgVirality"
+                """,
+                competitor_id,
+                niche,
+                winning_format,
+                top_topics or [],
+                avg_virality,
+            )
+            return dict(row) if row else None
+
+    async def get_competitor_insights_by_niche(
+        self,
+        niche: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT * FROM "CompetitorInsight" '
+                'WHERE "niche" = $1 ORDER BY "avgVirality" DESC LIMIT $2',
+                niche,
+                limit,
+            )
+            return [dict(r) for r in rows]
+
+    async def upsert_trend_store(
+        self,
+        topic: str,
+        hook_pattern: str | None = None,
+        content_format: str | None = None,
+        virality_score: float = 1.0,
+    ) -> dict[str, Any] | None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "TrendStore" (
+                    "topic", "hookPattern", "contentFormat", "viralityScore"
+                ) VALUES ($1, $2, $3::"ContentFormat", $4)
+                ON CONFLICT ("topic", "hookPattern")
+                DO UPDATE SET
+                    "contentFormat" = $3::"ContentFormat",
+                    "viralityScore" = $4
+                RETURNING "id", "topic", "viralityScore"
+                """,
+                topic,
+                hook_pattern,
+                content_format,
+                virality_score,
+            )
+            return dict(row) if row else None
+
+    async def get_trends_by_topic(
+        self,
+        topic: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            if topic:
+                rows = await conn.fetch(
+                    'SELECT * FROM "TrendStore" WHERE "topic" = $1 '
+                    'ORDER BY "viralityScore" DESC LIMIT $2',
+                    topic,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    'SELECT * FROM "TrendStore" '
+                    'ORDER BY "viralityScore" DESC LIMIT $1',
+                    limit,
+                )
+            return [dict(r) for r in rows]
+
+    async def get_reels_with_full_intelligence(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT r."id", r."instagramReelId", r."videoUrl",
+                       r."views", r."likes", r."commentsCount",
+                       r."saves", r."shares", r."reach",
+                       r."durationSec", r."postedAt",
+                       r."caption", r."transcript",
+                       a."followerCount", a."postsCount",
+                       rm."engagementRate", rm."viralityScore",
+                       ci."topic", ci."hookType", ci."hookText",
+                       ci."cta", ci."contentFormat",
+                       ci."narrativeStyle", ci."audienceIntent",
+                       ci."sentiment"
+                FROM "Reel" r
+                JOIN "Account" a ON r."accountId" = a."id"
+                LEFT JOIN "ReelMetric" rm ON rm."reelId" = r."id"
+                LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"
+                ORDER BY r."postedAt" DESC
+                LIMIT $1 OFFSET $2
+                """,
+                limit,
+                offset,
+            )
+            return [dict(r) for r in rows]

@@ -118,6 +118,39 @@ content_intelligence_reels_processed_total = Counter(
     "Total reels processed by content intelligence pipeline",
 )
 
+creator_intelligence_runs_total = Counter(
+    "creator_intelligence_runs_total",
+    "Total creator intelligence pipeline runs",
+    ["status"],
+)
+
+creator_intelligence_run_duration_seconds = Histogram(
+    "creator_intelligence_run_duration_seconds",
+    "Creator intelligence pipeline run duration in seconds",
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
+
+creator_intelligence_errors_total = Counter(
+    "creator_intelligence_errors_total",
+    "Total creator intelligence pipeline errors",
+    ["error_type"],
+)
+
+creator_intelligence_last_run_timestamp = Gauge(
+    "creator_intelligence_last_run_timestamp",
+    "Unix timestamp of last creator intelligence pipeline run",
+)
+
+creator_intelligence_last_run_duration_seconds = Gauge(
+    "creator_intelligence_last_run_duration_seconds",
+    "Duration in seconds of last creator intelligence pipeline run",
+)
+
+creator_intelligence_reels_processed_total = Counter(
+    "creator_intelligence_reels_processed_total",
+    "Total reels processed by creator intelligence pipeline",
+)
+
 
 def start_metrics_server() -> None:
     try:

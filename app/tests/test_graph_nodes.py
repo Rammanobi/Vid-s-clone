@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.graph.graph import (
     CLARIFYING_THRESHOLD,
     HIGH_CONFIDENCE_THRESHOLD,
+    _route_after_confidence,
     _route_after_reasoner,
     build_conversation_graph,
     compiled_graph,
@@ -24,7 +25,10 @@ from app.graph.nodes import (
     query_understanding_node,
     recommendation_generator_node,
     retrieval_planner_node,
+    set_clarification_node,
+    set_decline_node,
 )
+from app.graph.registry import ToolInfo, ToolRegistry, registry
 from app.graph.state import GraphState
 from app.graph.tools import (
     get_analytics,
@@ -59,6 +63,71 @@ STATE: GraphState = {
 
 def _make_config(db: Any | None = None, llm: Any | None = None) -> dict:
     return {"configurable": {"db": db, "llm": llm}}
+
+
+class TestToolRegistry:
+    def test_register_and_get(self) -> None:
+        reg = ToolRegistry()
+        tool = ToolInfo(name="test_tool", description="test", func=lambda db: {})
+        reg.register(tool)
+        assert reg.get("test_tool") is tool
+
+    def test_get_missing(self) -> None:
+        reg = ToolRegistry()
+        assert reg.get("nonexistent") is None
+
+    def test_has_tool(self) -> None:
+        reg = ToolRegistry()
+        reg.register(ToolInfo(name="a", description="d", func=lambda db: {}))
+        assert reg.has_tool("a") is True
+        assert reg.has_tool("b") is False
+
+    def test_list_tools(self) -> None:
+        reg = ToolRegistry()
+        reg.register(ToolInfo(name="a", description="d1", func=lambda db: {}))
+        reg.register(ToolInfo(name="b", description="d2", func=lambda db: {}))
+        names = [t.name for t in reg.list_tools()]
+        assert "a" in names
+        assert "b" in names
+
+    def test_tool_names(self) -> None:
+        reg = ToolRegistry()
+        reg.register(ToolInfo(name="a", description="d1", func=lambda db: {}))
+        assert reg.tool_names() == ["a"]
+
+    async def test_execute(self) -> None:
+        reg = ToolRegistry()
+        async def my_tool(db: Any) -> dict:
+            return {"result": "ok"}
+        reg.register(ToolInfo(name="t", description="d", func=my_tool))
+        result = await reg.execute("t", AsyncMock())
+        assert result == {"result": "ok"}
+
+    async def test_execute_missing_raises(self) -> None:
+        reg = ToolRegistry()
+        with pytest.raises(KeyError, match="Tool 'nonexistent' not found"):
+            await reg.execute("nonexistent", AsyncMock())
+
+    async def test_read_only_enforced(self) -> None:
+        reg = ToolRegistry()
+        async def write_tool(db: Any) -> dict:
+            return {"write": True}
+        reg.register(ToolInfo(name="w", description="d", func=write_tool, read_only=False))
+        result = await reg.execute("w", AsyncMock())
+        assert result["write"] is True
+
+    def test_global_registry_has_tools(self) -> None:
+        names = registry.tool_names()
+        assert "creator_knowledge" in names
+        assert "analytics" in names
+        assert "hybrid_search" in names
+        assert "competitor" in names
+        assert "trends" in names
+        assert "conversation_memory" in names
+
+    def test_global_registry_all_read_only(self) -> None:
+        for tool in registry.list_tools():
+            assert tool.read_only is True
 
 
 class TestConversationMemoryNode:
@@ -213,7 +282,7 @@ class TestRetrievalPlannerNode:
 
 
 class TestParallelRetrievalNode:
-    async def test_all_sources(self) -> None:
+    async def test_all_sources_via_registry(self) -> None:
         db = AsyncMock()
         db.get_creator_profile = AsyncMock(
             return_value={"bestTopics": ["AI"], "bestHookTypes": ["CURIOSITY"]}
@@ -279,6 +348,17 @@ class TestParallelRetrievalNode:
         assert result["analytics_context"] is not None
         assert mock_log.error.called
 
+    async def test_unknown_source_logs_warning(self) -> None:
+        db = AsyncMock()
+        state: GraphState = {
+            **STATE,
+            "retrieval_plan": [{"source": "nonexistent_tool"}],
+        }
+        with patch("app.graph.nodes.logger") as mock_log:
+            result = await parallel_retrieval_node(state, _make_config(db=db))
+        assert result["creator_context"] is None
+        assert result["analytics_context"] is None
+
 
 class TestContextFusionNode:
     async def test_merges_all_sources(self) -> None:
@@ -328,7 +408,7 @@ class TestConfidenceEvaluationNode:
             },
         }
         result = await confidence_evaluation_node(state, _make_config())
-        assert result["confidence_score"] >= 0.8
+        assert result["confidence_score"] >= HIGH_CONFIDENCE_THRESHOLD
 
     async def test_low_confidence(self) -> None:
         state: GraphState = {
@@ -336,7 +416,7 @@ class TestConfidenceEvaluationNode:
             "ranked_context": {"source_count": 0, "total_documents": 0},
         }
         result = await confidence_evaluation_node(state, _make_config())
-        assert result["confidence_score"] < 0.5
+        assert result["confidence_score"] < CLARIFYING_THRESHOLD
 
     async def test_medium_confidence(self) -> None:
         state: GraphState = {
@@ -356,26 +436,39 @@ class TestConfidenceEvaluationNode:
         assert result["confidence_score"] == 0.0
 
 
-class TestConversationalReasonerNode:
-    async def test_decline_low_confidence(self) -> None:
-        state: GraphState = {
-            **STATE,
-            "confidence_score": 0.3,
-            "ranked_context": {},
-        }
-        result = await conversational_reasoner_node(state, _make_config())
+class TestSetDeclineNode:
+    async def test_decline_message(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": 0.3}
+        result = await set_decline_node(state, _make_config())
         assert "couldn't find sufficient evidence" in (result["response"] or "").lower()
+        assert result["evidence"]["mode"] == "decline"
 
-    async def test_clarify_medium_confidence(self) -> None:
+    async def test_decline_evidence_note(self) -> None:
+        result = await set_decline_node(STATE, _make_config())
+        assert "insufficient evidence" in result["evidence"]["note"]
+
+
+class TestSetClarificationNode:
+    async def test_clarify_message_with_context(self) -> None:
         state: GraphState = {
             **STATE,
             "confidence_score": 0.6,
-            "ranked_context": {"analytics": {"reel_count": 5, "avg_engagement_rate": 0.03}},
+            "ranked_context": {
+                "analytics": {"reel_count": 5, "avg_engagement_rate": 0.03},
+                "creator_profile": {"best_topics": ["AI"]},
+            },
         }
-        result = await conversational_reasoner_node(state, _make_config())
-        assert result["response"] is not None
-        assert "moderate" in result["response"].lower() or "clarify" in result["response"].lower()
+        result = await set_clarification_node(state, _make_config())
+        assert "moderate" in (result["response"] or "").lower()
+        assert result["evidence"]["mode"] == "clarify"
+        assert "reels" in (result["response"] or "")
 
+    async def test_clarify_without_context(self) -> None:
+        result = await set_clarification_node(STATE, _make_config())
+        assert result["response"] is not None
+
+
+class TestConversationalReasonerNode:
     async def test_high_confidence_fallback(self) -> None:
         state: GraphState = {
             **STATE,
@@ -412,17 +505,27 @@ class TestConversationalReasonerNode:
         assert "AI tutorials" in (result["response"] or "")
         assert result["evidence"]["source"] == "llm_reasoner"
 
-
-class TestRecommendationGeneratorNode:
-    async def test_low_confidence_skips(self) -> None:
+    async def test_uses_conversation_history(self) -> None:
+        llm = AsyncMock()
+        llm.chat = AsyncMock(
+            return_value={"choices": [{"message": {"content": "Based on history..."}}]}
+        )
         state: GraphState = {
             **STATE,
-            "confidence_score": 0.4,
-            "response": "some answer",
+            "confidence_score": 0.9,
+            "ranked_context": {"analytics": {"reel_count": 5}},
+            "conversation_memory": {
+                "messages": [
+                    {"role": "user", "content": "previous question"},
+                    {"role": "assistant", "content": "previous answer"},
+                ]
+            },
         }
-        result = await recommendation_generator_node(state, _make_config())
-        assert result == {}
+        result = await conversational_reasoner_node(state, _make_config(llm=llm))
+        assert result["response"] is not None
 
+
+class TestRecommendationGeneratorNode:
     async def test_high_confidence_fallback(self) -> None:
         state: GraphState = {
             **STATE,
@@ -512,8 +615,8 @@ class TestMemoryUpdateNode:
         db = AsyncMock()
         db.create_chat_message = AsyncMock(
             side_effect=[
-                {"id": "msg1"},  # user message
-                {"id": "msg2"},  # assistant message
+                {"id": "msg1"},
+                {"id": "msg2"},
             ]
         )
         state: GraphState = {
@@ -549,20 +652,36 @@ class TestMemoryUpdateNode:
 
 
 class TestGraphRouting:
-    def test_route_after_reasoner_high_confidence(self) -> None:
+    def test_route_after_confidence_high(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": 0.9}
+        assert _route_after_confidence(state) == "conversational_reasoner"
+
+    def test_route_after_confidence_medium(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": 0.6}
+        assert _route_after_confidence(state) == "set_clarification"
+
+    def test_route_after_confidence_low(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": 0.3}
+        assert _route_after_confidence(state) == "set_decline"
+
+    def test_route_after_confidence_none(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": None}
+        assert _route_after_confidence(state) == "set_decline"
+
+    def test_route_after_confidence_boundary_clarify(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": CLARIFYING_THRESHOLD}
+        assert _route_after_confidence(state) == "set_clarification"
+
+    def test_route_after_confidence_boundary_high(self) -> None:
+        state: GraphState = {**STATE, "confidence_score": HIGH_CONFIDENCE_THRESHOLD}
+        assert _route_after_confidence(state) == "conversational_reasoner"
+
+    def test_route_after_reasoner_high(self) -> None:
         state: GraphState = {**STATE, "confidence_score": 0.9}
         assert _route_after_reasoner(state) == "recommendation_generator"
 
-    def test_route_after_reasoner_low_confidence(self) -> None:
+    def test_route_after_reasoner_low(self) -> None:
         state: GraphState = {**STATE, "confidence_score": 0.4}
-        assert _route_after_reasoner(state) == "citation_builder"
-
-    def test_route_after_reasoner_medium_confidence(self) -> None:
-        state: GraphState = {**STATE, "confidence_score": 0.6}
-        assert _route_after_reasoner(state) == "citation_builder"
-
-    def test_route_after_reasoner_none_confidence(self) -> None:
-        state: GraphState = {**STATE, "confidence_score": None}
         assert _route_after_reasoner(state) == "citation_builder"
 
     def test_graph_has_all_nodes(self) -> None:
@@ -579,6 +698,8 @@ class TestGraphRouting:
         assert "recommendation_generator" in node_names
         assert "citation_builder" in node_names
         assert "memory_update" in node_names
+        assert "set_decline" in node_names
+        assert "set_clarification" in node_names
 
 
 class TestGraphInvocation:
@@ -611,7 +732,66 @@ class TestGraphInvocation:
         builder = build_conversation_graph()
         graph = builder.compile()
         g = graph.get_graph()
-        assert len(g.nodes) == 13
+        assert len(g.nodes) == 15
+
+    async def test_high_confidence_flow_includes_recommendations(self) -> None:
+        state: GraphState = {**STATE.copy(), "user_query": "analyze my content strategy"}
+        db = AsyncMock()
+        db.get_session = AsyncMock(return_value={"id": "s1", "summary": ""})
+        db.get_chat_messages = AsyncMock(return_value=[])
+        db.get_creator_profile = AsyncMock(
+            return_value={
+                "bestTopics": ["AI"],
+                "bestHookTypes": ["CURIOSITY"],
+                "bestPostingDay": "Wednesday",
+                "audienceInterests": ["tech"],
+            }
+        )
+        db.get_reels_with_metrics = AsyncMock(
+            return_value=[{"engagementRate": 0.05, "viralityScore": 2.0, "views": 100, "likes": 10}]
+        )
+        db.get_competitor_insights_by_niche = AsyncMock(
+            return_value=[{"competitorId": "c1", "avgVirality": 2.0}]
+        )
+        db.get_trends_by_topic = AsyncMock(
+            return_value=[{"topic": "AI trends", "viralityScore": 3.0} for _ in range(12)]
+        )
+        db.get_reels_with_full_intelligence = AsyncMock(
+            return_value=[{"id": "r1", "caption": "content strategy analysis for reels", "topic": "AI", "hookText": "strategy"}]
+        )
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+
+        result = await compiled_graph.ainvoke(
+            state,
+            {"configurable": {"db": db, "llm": None}},
+        )
+        assert result["response"] is not None
+        assert "**Recommendations:**" in result["response"]
+
+    async def test_low_confidence_flow_skips_recommendations(self) -> None:
+        state: GraphState = {**STATE.copy(), "user_query": "hello"}
+        db = AsyncMock()
+        db.get_session = AsyncMock(return_value={"id": "s1", "summary": ""})
+        db.get_chat_messages = AsyncMock(return_value=[])
+        db.get_creator_profile = AsyncMock(return_value=None)
+        db.get_reels_with_metrics = AsyncMock(return_value=[])
+        db.get_competitor_insights_by_niche = AsyncMock(
+            side_effect=lambda niche, **kw: (
+                [] if niche == "general" else []
+            )
+        )
+        db.get_trends_by_topic = AsyncMock(return_value=[])
+        db.get_reels_with_full_intelligence = AsyncMock(return_value=[])
+        db.create_chat_message = AsyncMock(return_value={"id": "m1"})
+
+        result = await compiled_graph.ainvoke(
+            state,
+            {"configurable": {"db": db, "llm": None}},
+        )
+        assert result["response"] is not None
+        # Low confidence should route to set_decline, skipping recommendations
+        assert "**Recommendations:**" not in result["response"]
+        assert "couldn't find sufficient evidence" in result["response"].lower()
 
 
 class TestTools:

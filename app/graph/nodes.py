@@ -6,15 +6,9 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 from app.db import DatabaseClient
+from app.graph.registry import registry
 from app.graph.state import GraphState
-from app.graph.tools import (
-    get_analytics,
-    get_competitor_insights,
-    get_conversation_memory,
-    get_creator_knowledge,
-    get_trending_data,
-    hybrid_search,
-)
+from app.graph.tools import get_conversation_memory
 from app.llm import LLMClient
 from app.logging_setup import get_logger
 
@@ -241,6 +235,21 @@ async def retrieval_planner_node(
     return {"retrieval_plan": plan}
 
 
+SOURCE_TO_DOC_SOURCES = {
+    "creator_knowledge": None,
+    "analytics": None,
+    "competitor": None,
+    "trends": "trends",
+    "hybrid_search": "hybrid_search",
+}
+
+SOURCE_TO_CONTEXT_KEY = {
+    "creator_knowledge": "creator_context",
+    "analytics": "analytics_context",
+    "competitor": "competitor_context",
+}
+
+
 async def parallel_retrieval_node(
     state: GraphState,
     config: RunnableConfig,
@@ -259,54 +268,53 @@ async def parallel_retrieval_node(
     sources = {p["source"] for p in plan}
     tasks: dict[str, asyncio.Task] = {}
 
-    if "creator_knowledge" in sources:
-        tasks["creator"] = asyncio.create_task(
-            get_creator_knowledge(db)
-        )
-    if "analytics" in sources:
-        tasks["analytics"] = asyncio.create_task(
-            get_analytics(db)
-        )
-    if "competitor" in sources:
-        tasks["competitor"] = asyncio.create_task(
-            get_competitor_insights(db, niche=topic or "general")
-        )
-    if "trends" in sources:
-        tasks["trends"] = asyncio.create_task(
-            get_trending_data(db, topic=topic)
-        )
-    if "hybrid_search" in sources or "similar_reels" in sources:
-        tasks["search"] = asyncio.create_task(
-            hybrid_search(db, query=rewritten_query)
-        )
+    for source_name in sources:
+        tool = registry.get(source_name)
+        if tool is None:
+            logger.warning("retrieval_source_not_found", source=source_name)
+            continue
+        if source_name == "creator_knowledge":
+            tasks[source_name] = asyncio.create_task(
+                registry.execute(source_name, db)
+            )
+        elif source_name == "analytics":
+            tasks[source_name] = asyncio.create_task(
+                registry.execute(source_name, db)
+            )
+        elif source_name == "competitor":
+            tasks[source_name] = asyncio.create_task(
+                registry.execute(source_name, db, niche=topic or "general")
+            )
+        elif source_name == "trends":
+            tasks[source_name] = asyncio.create_task(
+                registry.execute(source_name, db, topic=topic)
+            )
+        elif source_name == "hybrid_search":
+            tasks[source_name] = asyncio.create_task(
+                registry.execute(source_name, db, query=rewritten_query)
+            )
 
     if tasks:
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         task_names = list(tasks.keys())
         for name, result in zip(task_names, results):
             if isinstance(result, Exception):
-                logger.error(
-                    "retrieval_failed",
-                    source=name,
-                    error=str(result),
-                )
+                logger.error("retrieval_failed", source=name, error=str(result))
                 continue
-            if name == "creator":
-                creator_context = result
-            elif name == "analytics":
-                analytics_context = result
-            elif name == "competitor":
-                competitor_context = result
-            elif name == "trends":
+            doc_source = SOURCE_TO_DOC_SOURCES.get(name)
+            if doc_source:
                 if isinstance(result, list):
                     retrieved_documents.extend(
-                        {"source": "trends", "data": r} for r in result
+                        {"source": doc_source, "data": r} for r in result
                     )
-            elif name == "search":
-                if isinstance(result, list):
-                    retrieved_documents.extend(
-                        {"source": "hybrid_search", "data": r} for r in result
-                    )
+            else:
+                ctx_key = SOURCE_TO_CONTEXT_KEY.get(name)
+                if ctx_key == "creator_context":
+                    creator_context = result
+                elif ctx_key == "analytics_context":
+                    analytics_context = result
+                elif ctx_key == "competitor_context":
+                    competitor_context = result
 
     logger.debug(
         "parallel_retrieval_completed",
@@ -409,38 +417,46 @@ async def confidence_evaluation_node(
     return {"confidence_score": confidence_score}
 
 
+async def set_decline_node(
+    state: GraphState,
+    config: RunnableConfig,
+) -> dict[str, Any]:
+    response = (
+        "I couldn't find sufficient evidence to answer that accurately. "
+        "Could you narrow it down to a specific time period or content category?"
+    )
+    evidence: dict[str, Any] = {"note": "insufficient evidence for confident response", "mode": "decline"}
+    logger.debug("response_set", mode="decline", confidence=state.get("confidence_score"))
+    return {"response": response, "evidence": evidence}
+
+
+async def set_clarification_node(
+    state: GraphState,
+    config: RunnableConfig,
+) -> dict[str, Any]:
+    ranked_context = state.get("ranked_context") or {}
+    context_summary = _summarize_context(ranked_context)
+    response = (
+        f"I found some relevant information, but my confidence is moderate. "
+        f"Based on what I found: {context_summary} "
+        f"Could you provide more specific details for a more precise answer?"
+    )
+    evidence: dict[str, Any] = {"note": "partial evidence, clarifying question appended", "mode": "clarify"}
+    logger.debug("response_set", mode="clarify", confidence=state.get("confidence_score"))
+    return {"response": response, "evidence": evidence}
+
+
 async def conversational_reasoner_node(
     state: GraphState,
     config: RunnableConfig,
 ) -> dict[str, Any]:
+    # Only reached when confidence_score >= HIGH_CONFIDENCE_THRESHOLD
     user_query = state.get("user_query", "")
     ranked_context = state.get("ranked_context") or {}
     confidence_score = state.get("confidence_score") or 0.0
     llm = _config_to_llm(config)
     response: str | None = None
     evidence: dict[str, Any] = {}
-
-    if confidence_score < CLARIFYING_THRESHOLD:
-        response = (
-            "I couldn't find sufficient evidence to answer that accurately. "
-            "Could you narrow it down to a specific time period or content category?"
-        )
-        evidence = {"note": "insufficient evidence for confident response"}
-        logger.debug("response_generated", mode="decline", confidence=confidence_score)
-        return {"response": response, "evidence": evidence}
-
-    if confidence_score < HIGH_CONFIDENCE_THRESHOLD:
-        context_summary = _summarize_context(ranked_context)
-        response = (
-            f"I found some relevant information, but my confidence is moderate. "
-            f"Based on what I found: {context_summary} "
-            f"Could you provide more specific details for a more precise answer?"
-        )
-        evidence = {"note": "partial evidence, clarifying question appended"}
-        logger.debug(
-            "response_generated", mode="clarify", confidence=confidence_score
-        )
-        return {"response": response, "evidence": evidence}
 
     if llm:
         context_str = _format_context_for_llm(ranked_context)

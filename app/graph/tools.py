@@ -4,6 +4,7 @@ import statistics
 from typing import Any
 
 from app.db import DatabaseClient
+from app.graph.registry import ToolInfo, registry
 from app.logging_setup import get_logger
 
 logger = get_logger(__name__)
@@ -124,3 +125,47 @@ async def get_conversation_memory(
         "messages": messages,
         "message_count": len(messages),
     }
+
+
+registry.register(ToolInfo(
+    name="creator_knowledge",
+    description="Creator's best topics, hooks, posting patterns, and audience interests",
+    func=get_creator_knowledge,
+    read_only=True,
+    param_names=["account_id"],
+))
+registry.register(ToolInfo(
+    name="analytics",
+    description="Performance metrics: engagement rate, virality score, views, likes across reels",
+    func=get_analytics,
+    read_only=True,
+    param_names=["limit"],
+))
+registry.register(ToolInfo(
+    name="hybrid_search",
+    description="Text-scored semantic search across reel transcripts, captions, topics, and hook text",
+    func=hybrid_search,
+    read_only=True,
+    param_names=["query", "limit"],
+))
+registry.register(ToolInfo(
+    name="competitor",
+    description="Competitor strategies, winning formats, top topics, and virality benchmarks by niche",
+    func=get_competitor_insights,
+    read_only=True,
+    param_names=["niche", "limit"],
+))
+registry.register(ToolInfo(
+    name="trends",
+    description="Trending topics, hook patterns, content formats sorted by virality score",
+    func=get_trending_data,
+    read_only=True,
+    param_names=["topic", "limit"],
+))
+registry.register(ToolInfo(
+    name="conversation_memory",
+    description="Session chat history, summary, and message count for conversation continuity",
+    func=get_conversation_memory,
+    read_only=True,
+    param_names=["session_id", "limit"],
+))

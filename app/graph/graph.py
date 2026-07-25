@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from langgraph.graph import END, StateGraph
 
@@ -16,6 +16,8 @@ from app.graph.nodes import (
     query_understanding_node,
     recommendation_generator_node,
     retrieval_planner_node,
+    set_clarification_node,
+    set_decline_node,
 )
 from app.graph.state import GraphState
 
@@ -33,6 +35,19 @@ NODE_CONVERSATIONAL_REASONER = "conversational_reasoner"
 NODE_RECOMMENDATION_GENERATOR = "recommendation_generator"
 NODE_CITATION_BUILDER = "citation_builder"
 NODE_MEMORY_UPDATE = "memory_update"
+NODE_SET_DECLINE = "set_decline"
+NODE_SET_CLARIFICATION = "set_clarification"
+
+
+def _route_after_confidence(
+    state: GraphState,
+) -> Literal["conversational_reasoner", "set_clarification", "set_decline"]:
+    confidence = state.get("confidence_score") or 0.0
+    if confidence >= HIGH_CONFIDENCE_THRESHOLD:
+        return NODE_CONVERSATIONAL_REASONER
+    if confidence >= CLARIFYING_THRESHOLD:
+        return NODE_SET_CLARIFICATION
+    return NODE_SET_DECLINE
 
 
 def _route_after_reasoner(
@@ -58,6 +73,8 @@ def build_conversation_graph() -> StateGraph:
     builder.add_node(NODE_RECOMMENDATION_GENERATOR, recommendation_generator_node)
     builder.add_node(NODE_CITATION_BUILDER, citation_builder_node)
     builder.add_node(NODE_MEMORY_UPDATE, memory_update_node)
+    builder.add_node(NODE_SET_DECLINE, set_decline_node)
+    builder.add_node(NODE_SET_CLARIFICATION, set_clarification_node)
 
     builder.set_entry_point(NODE_CONVERSATION_MEMORY)
 
@@ -67,13 +84,19 @@ def build_conversation_graph() -> StateGraph:
     builder.add_edge(NODE_RETRIEVAL_PLANNER, NODE_PARALLEL_RETRIEVAL)
     builder.add_edge(NODE_PARALLEL_RETRIEVAL, NODE_CONTEXT_FUSION)
     builder.add_edge(NODE_CONTEXT_FUSION, NODE_CONFIDENCE_EVALUATION)
-    builder.add_edge(NODE_CONFIDENCE_EVALUATION, NODE_CONVERSATIONAL_REASONER)
+
+    builder.add_conditional_edges(
+        NODE_CONFIDENCE_EVALUATION,
+        _route_after_confidence,
+    )
 
     builder.add_conditional_edges(
         NODE_CONVERSATIONAL_REASONER,
         _route_after_reasoner,
     )
 
+    builder.add_edge(NODE_SET_DECLINE, NODE_CITATION_BUILDER)
+    builder.add_edge(NODE_SET_CLARIFICATION, NODE_CITATION_BUILDER)
     builder.add_edge(NODE_RECOMMENDATION_GENERATOR, NODE_CITATION_BUILDER)
     builder.add_edge(NODE_CITATION_BUILDER, NODE_MEMORY_UPDATE)
     builder.add_edge(NODE_MEMORY_UPDATE, END)

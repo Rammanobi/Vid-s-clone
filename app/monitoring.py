@@ -151,6 +151,16 @@ creator_intelligence_reels_processed_total = Counter(
     "Total reels processed by creator intelligence pipeline",
 )
 
+knowledge_scheduler_running = Gauge(
+    "knowledge_scheduler_running",
+    "1 if the knowledge scheduler loop is active, 0 otherwise",
+)
+
+knowledge_consecutive_failures = Gauge(
+    "knowledge_consecutive_failures",
+    "Number of consecutive failure cycles in the knowledge scheduler",
+)
+
 
 def start_metrics_server() -> None:
     try:

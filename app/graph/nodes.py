@@ -290,8 +290,13 @@ async def parallel_retrieval_node(
                 registry.execute(source_name, db, topic=topic)
             )
         elif source_name == "hybrid_search":
+            metadata_filters = state.get("metadata_filters")
             tasks[source_name] = asyncio.create_task(
-                registry.execute(source_name, db, query=rewritten_query)
+                registry.execute(
+                    source_name, db,
+                    query=rewritten_query,
+                    metadata_filters=metadata_filters,
+                )
             )
 
     if tasks:

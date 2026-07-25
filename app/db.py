@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,6 +11,80 @@ import asyncpg
 from app.logging_setup import get_logger
 
 logger = get_logger(__name__)
+
+
+def normalize_embedding(embedding: list[float]) -> list[float]:
+    if not embedding:
+        return embedding
+    norm = math.sqrt(sum(x * x for x in embedding))
+    if norm == 0:
+        return embedding
+    return [x / norm for x in embedding]
+
+
+def _build_metadata_clause(
+    filters: dict[str, Any] | None,
+    param_offset: int = 2,
+) -> tuple[str, list[Any], bool]:
+    parts: list[str] = []
+    params: list[Any] = []
+    needs_ci_join = False
+    idx = param_offset
+
+    if not filters:
+        return "", [], False
+
+    account_id = filters.get("account_id")
+    if account_id:
+        parts.append(f'r."accountId" = ${idx}')
+        params.append(account_id)
+        idx += 1
+
+    time_range = filters.get("time_range")
+    if time_range:
+        days = _parse_time_range_days(time_range)
+        if days is not None:
+            parts.append(f'r."postedAt" >= NOW() - INTERVAL \'${idx} days\'')
+            params.append(days)
+            idx += 1
+
+    topic = filters.get("topic")
+    if topic:
+        needs_ci_join = True
+        parts.append(f'ci."topic" ILIKE ${idx}')
+        params.append(f"%{topic}%")
+        idx += 1
+
+    content_format = filters.get("content_format")
+    if content_format:
+        needs_ci_join = True
+        parts.append(f'ci."contentFormat" = ${idx}::"ContentFormat"')
+        params.append(content_format)
+        idx += 1
+
+    hook_type = filters.get("hook_type")
+    if hook_type:
+        needs_ci_join = True
+        parts.append(f'ci."hookType" = ${idx}::"HookType"')
+        params.append(hook_type)
+        idx += 1
+
+    where_clause = " AND ".join(parts) if parts else ""
+    return where_clause, params, needs_ci_join
+
+
+def _parse_time_range_days(time_range: str) -> int | None:
+    tr = time_range.lower().strip()
+    m = re.match(r"(?:last[\s_]+)?(\d+)[\s_]*(?:day|days|d)", tr)
+    if m:
+        return int(m.group(1))
+    lut: dict[str, int] = {
+        "today": 1, "yesterday": 2, "this_week": 7, "last_week": 14,
+        "this_month": 30, "last_month": 60, "last_30_days": 30,
+        "last_7_days": 7, "last_90_days": 90, "last_quarter": 90,
+        "this_year": 365, "last_year": 730,
+    }
+    return lut.get(tr)
 
 
 class DatabaseClient:
@@ -684,7 +760,7 @@ class DatabaseClient:
                        ci."topic", ci."hookType", ci."hookText",
                        ci."cta", ci."contentFormat",
                        ci."narrativeStyle", ci."audienceIntent",
-                       ci."sentiment"
+                        ci."sentiment"
                 FROM "Reel" r
                 JOIN "Account" a ON r."accountId" = a."id"
                 LEFT JOIN "ReelMetric" rm ON rm."reelId" = r."id"
@@ -696,3 +772,208 @@ class DatabaseClient:
                 offset,
             )
             return [dict(r) for r in rows]
+
+    async def search_reels_dense(
+        self,
+        query_embedding: list[float],
+        metadata_filters: dict[str, Any] | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        query_vec = normalize_embedding(query_embedding)
+
+        filter_clause, filter_params, needs_ci = _build_metadata_clause(
+            metadata_filters, param_offset=3
+        )
+        ci_join = (
+            'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'
+            if needs_ci
+            else ""
+        )
+        where = f'AND ({filter_clause})' if filter_clause else ""
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                  r."id" AS reel_id,
+                  r."caption",
+                  r."transcript",
+                  r."visualSummary" AS visual_summary,
+                  r."textOverlays" AS text_overlays,
+                  r."durationSec" AS duration_sec,
+                  r."postedAt" AS posted_at,
+                  ci."topic",
+                  ci."hookText" AS hook_text,
+                  ci."contentFormat" AS content_format,
+                  ci."hookType" AS hook_type,
+                  1 - (r."combinedEmbedding" <=> $1::vector) AS retrieval_score
+                FROM "Reel" r
+                {ci_join}
+                WHERE r."combinedEmbedding" IS NOT NULL
+                {where}
+                ORDER BY r."combinedEmbedding" <=> $1::vector ASC
+                LIMIT $2
+                """,
+                query_vec,
+                limit,
+                *filter_params,
+            )
+            return [_format_retrieval_row(r) for r in rows]
+
+    async def search_reels_sparse(
+        self,
+        query: str,
+        metadata_filters: dict[str, Any] | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        if not query.strip():
+            return []
+
+        filter_clause, filter_params, needs_ci = _build_metadata_clause(
+            metadata_filters, param_offset=3
+        )
+        ci_join = (
+            'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'
+            if needs_ci
+            else ""
+        )
+        where = f'AND ({filter_clause})' if filter_clause else ""
+        tsquery = "plainto_tsquery('english', $1)"
+
+        query_lower = query.lower()
+        matched_terms = [w for w in query_lower.split() if len(w) > 1 and w.isalnum()]
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                  r."id" AS reel_id,
+                  r."caption",
+                  r."transcript",
+                  r."visualSummary" AS visual_summary,
+                  r."textOverlays" AS text_overlays,
+                  r."durationSec" AS duration_sec,
+                  r."postedAt" AS posted_at,
+                  ci."topic",
+                  ci."hookText" AS hook_text,
+                  ci."contentFormat" AS content_format,
+                  ci."hookType" AS hook_type,
+                  ts_rank(r."searchVector", {tsquery}) AS bm25_score,
+                  $3::text[] AS matched_terms
+                FROM "Reel" r
+                {ci_join}
+                WHERE r."searchVector" @@ {tsquery}
+                {where}
+                ORDER BY bm25_score DESC
+                LIMIT $2
+                """,
+                query,
+                limit,
+                matched_terms,
+                *filter_params,
+            )
+            return [_format_sparse_row(r) for r in rows]
+
+    async def search_reels_hybrid(
+        self,
+        query: str | None = None,
+        query_embedding: list[float] | None = None,
+        metadata_filters: dict[str, Any] | None = None,
+        dense_limit: int = 20,
+        sparse_limit: int = 20,
+        final_limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        dense_results: list[dict[str, Any]] = []
+        sparse_results: list[dict[str, Any]] = []
+
+        if query_embedding:
+            dense_results = await self.search_reels_dense(
+                query_embedding, metadata_filters=metadata_filters, limit=dense_limit
+            )
+        if query and query.strip():
+            sparse_results = await self.search_reels_sparse(
+                query, metadata_filters=metadata_filters, limit=sparse_limit
+            )
+
+        seen: set[str] = set()
+        fused: list[dict[str, Any]] = []
+
+        for item in dense_results:
+            rid = item.get("reel_id", "")
+            if rid not in seen:
+                seen.add(rid)
+                fused.append(item)
+
+        for item in sparse_results:
+            rid = item.get("reel_id", "")
+            if rid not in seen:
+                seen.add(rid)
+                fused.append(item)
+
+        return fused[:final_limit]
+
+
+def _format_retrieval_row(row: asyncpg.Record) -> dict[str, Any]:
+    contexts: list[str] = []
+    caption = row.get("caption")
+    if caption and str(caption).strip():
+        contexts.append(str(caption))
+    transcript = row.get("transcript")
+    if transcript and str(transcript).strip():
+        contexts.append(str(transcript))
+    visual_summary = row.get("visual_summary")
+    if visual_summary and str(visual_summary).strip():
+        contexts.append(str(visual_summary))
+    text_overlays = row.get("text_overlays")
+    if text_overlays:
+        for t in text_overlays:
+            if t and str(t).strip():
+                contexts.append(str(t))
+
+    return {
+        "reel_id": str(row.get("reel_id", "")),
+        "retrieval_score": round(float(row.get("retrieval_score", 0.0)), 4),
+        "contexts": contexts,
+        "topic": str(row.get("topic", "")) if row.get("topic") else "",
+        "hook_text": str(row.get("hook_text", "")) if row.get("hook_text") else "",
+        "content_format": str(row.get("content_format", "")) if row.get("content_format") else "",
+        "hook_type": str(row.get("hook_type", "")) if row.get("hook_type") else "",
+        "caption": str(row.get("caption", "")) if row.get("caption") else "",
+        "duration_sec": float(row.get("duration_sec", 0.0)) if row.get("duration_sec") else 0.0,
+    }
+
+
+def _format_sparse_row(row: asyncpg.Record) -> dict[str, Any]:
+    contexts: list[str] = []
+    caption = row.get("caption")
+    if caption and str(caption).strip():
+        contexts.append(str(caption))
+    transcript = row.get("transcript")
+    if transcript and str(transcript).strip():
+        contexts.append(str(transcript))
+    visual_summary = row.get("visual_summary")
+    if visual_summary and str(visual_summary).strip():
+        contexts.append(str(visual_summary))
+    text_overlays = row.get("text_overlays")
+    if text_overlays:
+        for t in text_overlays:
+            if t and str(t).strip():
+                contexts.append(str(t))
+
+    matched = row.get("matched_terms") or []
+
+    return {
+        "reel_id": str(row.get("reel_id", "")),
+        "bm25_score": round(float(row.get("bm25_score", 0.0)), 4),
+        "matched_terms": [str(t) for t in matched],
+        "topic": str(row.get("topic", "")) if row.get("topic") else "",
+        "hook_text": str(row.get("hook_text", "")) if row.get("hook_text") else "",
+        "content_format": str(row.get("content_format", "")) if row.get("content_format") else "",
+        "hook_type": str(row.get("hook_type", "")) if row.get("hook_type") else "",
+        "caption": str(row.get("caption", "")) if row.get("caption") else "",
+        "duration_sec": float(row.get("duration_sec", 0.0)) if row.get("duration_sec") else 0.0,
+    }

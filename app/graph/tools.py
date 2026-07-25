@@ -57,17 +57,34 @@ async def get_analytics(
 async def hybrid_search(
     db: DatabaseClient,
     query: str,
+    metadata_filters: dict[str, Any] | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    reels = await db.get_reels_with_full_intelligence(limit=limit)
+    try:
+        results = await db.search_reels_hybrid(
+            query=query,
+            metadata_filters=metadata_filters,
+            dense_limit=limit,
+            sparse_limit=limit,
+            final_limit=limit,
+        )
+        if results:
+            return results
+    except Exception as exc:
+        logger.warning("hybrid_search_db_failed", error=str(exc))
 
     if not query:
-        return reels[:5]
+        return []
 
     query_lower = query.lower()
     query_terms = query_lower.split()
 
     scored: list[tuple[float, dict[str, Any]]] = []
+    try:
+        reels = await db.get_reels_with_full_intelligence(limit=100)
+    except Exception:
+        return []
+
     for reel in reels:
         score = 0.0
         caption = (reel.get("caption") or "").lower()
@@ -88,7 +105,7 @@ async def hybrid_search(
             scored.append((score, reel))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [s[1] for s in scored[:5]]
+    return [s[1] for s in scored[:min(5, limit)]]
 
 
 async def get_competitor_insights(
@@ -143,10 +160,10 @@ registry.register(ToolInfo(
 ))
 registry.register(ToolInfo(
     name="hybrid_search",
-    description="Text-scored semantic search across reel transcripts, captions, topics, and hook text",
+    description="Semantic and keyword search across reel transcripts, captions, visual summary, and content attributes using pgvector and tsvector",
     func=hybrid_search,
     read_only=True,
-    param_names=["query", "limit"],
+    param_names=["query", "metadata_filters", "limit"],
 ))
 registry.register(ToolInfo(
     name="competitor",

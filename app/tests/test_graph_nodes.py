@@ -296,6 +296,9 @@ class TestParallelRetrievalNode:
         db.get_trends_by_topic = AsyncMock(
             return_value=[{"topic": "AI trends", "viralityScore": 3.0}]
         )
+        db.search_reels_hybrid = AsyncMock(
+            return_value=[{"reel_id": "r1", "retrieval_score": 0.92, "contexts": ["test reel"]}]
+        )
         db.get_reels_with_full_intelligence = AsyncMock(
             return_value=[{"id": "r1", "caption": "test reel", "topic": "AI"}]
         )
@@ -803,6 +806,7 @@ class TestGraphInvocation:
         db.get_reels_with_metrics = AsyncMock(return_value=[])
         db.get_competitor_insights_by_niche = AsyncMock(return_value=[])
         db.get_trends_by_topic = AsyncMock(return_value=[])
+        db.search_reels_hybrid = AsyncMock(return_value=[])
         db.get_reels_with_full_intelligence = AsyncMock(return_value=[])
         db.create_chat_message = AsyncMock(return_value={"id": "m1"})
 
@@ -844,6 +848,9 @@ class TestGraphInvocation:
         db.get_competitor_insights_by_niche = AsyncMock(
             return_value=[{"competitorId": "c1", "avgVirality": 2.0}]
         )
+        db.search_reels_hybrid = AsyncMock(
+            return_value=[{"reel_id": "r1", "retrieval_score": 0.85, "contexts": ["content strategy analysis for reels"]}]
+        )
         db.get_trends_by_topic = AsyncMock(
             return_value=[{"topic": "AI trends", "viralityScore": 3.0} for _ in range(12)]
         )
@@ -871,6 +878,7 @@ class TestGraphInvocation:
                 [] if niche == "general" else []
             )
         )
+        db.search_reels_hybrid = AsyncMock(return_value=[])
         db.get_trends_by_topic = AsyncMock(return_value=[])
         db.get_reels_with_full_intelligence = AsyncMock(return_value=[])
         db.create_chat_message = AsyncMock(return_value={"id": "m1"})
@@ -928,14 +936,24 @@ class TestTools:
 
     async def test_hybrid_search_no_query(self) -> None:
         db = AsyncMock()
-        db.get_reels_with_full_intelligence = AsyncMock(
-            return_value=[{"id": "r1"}, {"id": "r2"}]
-        )
+        db.search_reels_hybrid = AsyncMock(return_value=[{"reel_id": "r1"}, {"reel_id": "r2"}])
         result = await hybrid_search(db, query="")
         assert len(result) == 2
+        db.search_reels_hybrid.assert_called_once()
 
-    async def test_hybrid_search_with_query(self) -> None:
+    async def test_hybrid_search_with_query_dense(self) -> None:
         db = AsyncMock()
+        db.search_reels_hybrid = AsyncMock(
+            return_value=[{"reel_id": "r1", "retrieval_score": 0.92, "contexts": ["AI tutorial"]}]
+        )
+        result = await hybrid_search(db, query="AI tutorial", metadata_filters={"topic": "AI"})
+        assert len(result) == 1
+        assert result[0]["reel_id"] == "r1"
+        db.search_reels_hybrid.assert_called_once()
+
+    async def test_hybrid_search_fallback_keyword(self) -> None:
+        db = AsyncMock()
+        db.search_reels_hybrid = AsyncMock(return_value=[])
         db.get_reels_with_full_intelligence = AsyncMock(
             return_value=[
                 {"id": "r1", "caption": "AI tutorial video", "topic": "AI", "hookText": "learn now"},
@@ -981,3 +999,174 @@ class TestTools:
         result = await get_conversation_memory(db, session_id="s1")
         assert result["message_count"] == 1
         assert result["session"]["summary"] == "test summary"
+
+
+class TestRetrievalFunctions:
+    def test_normalize_embedding(self) -> None:
+        from app.db import normalize_embedding
+        assert normalize_embedding([3.0, 4.0]) == [0.6, 0.8]
+        assert normalize_embedding([1.0, 0.0]) == [1.0, 0.0]
+        assert normalize_embedding([0.0, 0.0]) == [0.0, 0.0]
+        empty: list[float] = []
+        assert normalize_embedding(empty) == []
+
+    def test_normalize_embedding_already_normalized(self) -> None:
+        from app.db import normalize_embedding
+        result = normalize_embedding([0.6, 0.8])
+        assert abs(result[0] - 0.6) < 1e-10
+        assert abs(result[1] - 0.8) < 1e-10
+
+    def test_build_metadata_clause_no_filters(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause(None)
+        assert clause == ""
+        assert params == []
+        assert needs_ci is False
+
+    def test_build_metadata_clause_empty_filters(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({})
+        assert clause == ""
+        assert params == []
+        assert needs_ci is False
+
+    def test_build_metadata_clause_account_id(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({"account_id": "abc-123"})
+        assert "accountId" in clause
+        assert params == ["abc-123"]
+        assert needs_ci is False
+
+    def test_build_metadata_clause_topic(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({"topic": "AI"})
+        assert "ci.\"topic\" ILIKE" in clause
+        assert params == ["%AI%"]
+        assert needs_ci is True
+
+    def test_build_metadata_clause_topic_and_account(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({"topic": "AI", "account_id": "acc1"})
+        assert "accountId" in clause
+        assert "topic" in clause
+        assert params == ["acc1", "%AI%"]
+        assert needs_ci is True
+
+    def test_build_metadata_clause_content_format(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({"content_format": "TUTORIAL"})
+        assert "contentFormat" in clause
+        assert params == ["TUTORIAL"]
+        assert needs_ci is True
+
+    def test_build_metadata_clause_hook_type(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({"hook_type": "CURIOSITY"})
+        assert "hookType" in clause
+        assert params == ["CURIOSITY"]
+        assert needs_ci is True
+
+    def test_build_metadata_clause_full(self) -> None:
+        from app.db import _build_metadata_clause
+        clause, params, needs_ci = _build_metadata_clause({
+            "account_id": "acc1",
+            "topic": "AI",
+            "content_format": "TUTORIAL",
+            "hook_type": "CURIOSITY",
+        })
+        assert "accountId" in clause
+        assert "topic" in clause
+        assert "contentFormat" in clause
+        assert "hookType" in clause
+        assert len(params) == 4
+        assert needs_ci is True
+        assert " AND " in clause
+
+    def test_parse_time_range_days_last_30(self) -> None:
+        from app.db import _parse_time_range_days
+        assert _parse_time_range_days("last_30_days") == 30
+        assert _parse_time_range_days("last 30 days") == 30
+        assert _parse_time_range_days("30d") == 30
+        assert _parse_time_range_days("7 days") == 7
+        assert _parse_time_range_days("this_week") == 7
+        assert _parse_time_range_days("this_month") == 30
+        assert _parse_time_range_days("") is None
+        assert _parse_time_range_days("invalid") is None
+
+    async def test_search_reels_dense_empty_pool(self) -> None:
+        from app.db import DatabaseClient
+        db = DatabaseClient("postgresql://fake")
+        with pytest.raises(RuntimeError, match="Database pool not initialized"):
+            await db.search_reels_dense([0.1] * 1536)
+
+    async def test_search_reels_sparse_empty_pool(self) -> None:
+        from app.db import DatabaseClient
+        db = DatabaseClient("postgresql://fake")
+        with pytest.raises(RuntimeError, match="Database pool not initialized"):
+            await db.search_reels_sparse("test query")
+
+    async def test_search_reels_hybrid_empty_pool(self) -> None:
+        from app.db import DatabaseClient
+        db = DatabaseClient("postgresql://fake")
+        with pytest.raises(RuntimeError, match="Database pool not initialized"):
+            await db.search_reels_hybrid(query="test", query_embedding=[0.1] * 1536)
+
+    async def test_hybrid_search_with_metadata_filters(self) -> None:
+        db = AsyncMock()
+        db.search_reels_hybrid = AsyncMock(
+            return_value=[{"reel_id": "r1", "retrieval_score": 0.85, "contexts": ["AI content"]}]
+        )
+        result = await hybrid_search(db, query="AI", metadata_filters={"topic": "AI", "account_id": "acc1"})
+        assert len(result) == 1
+        db.search_reels_hybrid.assert_called_with(
+            query="AI",
+            metadata_filters={"topic": "AI", "account_id": "acc1"},
+            dense_limit=20,
+            sparse_limit=20,
+            final_limit=20,
+        )
+
+    async def test_hybrid_search_dense_fallback_on_exception(self) -> None:
+        db = AsyncMock()
+        db.search_reels_hybrid = AsyncMock(side_effect=Exception("DB error"))
+        db.get_reels_with_full_intelligence = AsyncMock(
+            return_value=[{"id": "r1", "caption": "machine learning", "topic": "AI", "hookText": "learn AI"}]
+        )
+        result = await hybrid_search(db, query="machine learning")
+        assert len(result) == 1
+        assert result[0]["id"] == "r1"
+
+    def test_format_retrieval_row(self) -> None:
+        from app.db import _format_retrieval_row
+        row = type("Row", (), {
+            "get": lambda self, k, d=None: {
+                "reel_id": "r1", "retrieval_score": 0.85,
+                "caption": "hello", "transcript": "world",
+                "visual_summary": "summary", "text_overlays": ["text1"],
+                "topic": "AI", "hook_text": "hook", "content_format": "TUTORIAL",
+                "hook_type": "CURIOSITY", "duration_sec": 30.0,
+            }.get(k, d)
+        })()
+        result = _format_retrieval_row(row)
+        assert result["reel_id"] == "r1"
+        assert result["retrieval_score"] == 0.85
+        assert "hello" in result["contexts"]
+        assert "world" in result["contexts"]
+        assert result["topic"] == "AI"
+
+    def test_format_sparse_row(self) -> None:
+        from app.db import _format_sparse_row
+        row = type("Row", (), {
+            "get": lambda self, k, d=None: {
+                "reel_id": "r2", "bm25_score": 0.75,
+                "caption": "AI tutorial", "transcript": "learn AI",
+                "visual_summary": None, "text_overlays": [],
+                "topic": "AI", "hook_text": "", "content_format": "",
+                "hook_type": "", "duration_sec": 45.0,
+                "matched_terms": ["AI", "learn"],
+            }.get(k, d)
+        })()
+        result = _format_sparse_row(row)
+        assert result["reel_id"] == "r2"
+        assert result["bm25_score"] == 0.75
+        assert result["matched_terms"] == ["AI", "learn"]

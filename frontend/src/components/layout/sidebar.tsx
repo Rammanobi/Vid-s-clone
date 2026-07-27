@@ -3,10 +3,11 @@
 import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, BarChart3, Film, GitBranch, Bot, Settings } from "lucide-react"
+import { LayoutDashboard, BarChart3, Film, GitBranch, Bot, Settings, AtSign } from "lucide-react"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/connect", label: "Connect", icon: AtSign },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/content", label: "Content Intelligence", icon: Film },
   { href: "/pipeline", label: "Pipeline", icon: GitBranch },
@@ -16,8 +17,6 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname()
-
-  if (pathname === "/login") return null
 
   return (
     <aside className="hidden lg:flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" aria-label="Sidebar navigation">

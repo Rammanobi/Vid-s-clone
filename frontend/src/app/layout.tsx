@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/layout/theme-provider"
@@ -53,6 +53,16 @@ export const metadata: Metadata = {
     follow: true,
   },
   metadataBase: new URL(baseUrl),
+}
+
+// Standard responsive viewport. A fixed width=1280 was tried here to force
+// a desktop layout on phones, but a page-level viewport override is exactly
+// what breaks native touch-scrolling on many mobile browsers (real "Request
+// Desktop Site" is a browser feature, not something a meta tag can safely
+// replicate) - reverted so scrolling is reliable everywhere.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 }
 
 export default function RootLayout({

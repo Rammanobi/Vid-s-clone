@@ -1,22 +1,45 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Activity, Film, TrendingUp, AlertCircle, Play, GitBranch, Sparkles } from "lucide-react"
+import Link from "next/link"
+import { Activity, Film, TrendingUp, AlertCircle, Play, GitBranch, Sparkles, AtSign, ArrowRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, type ApiHealth, type PipelineHealth } from "@/lib/api"
+import { api, type ApiHealth, type PipelineHealth, type Account } from "@/lib/api"
 import { useAuth } from "@/lib/auth-context"
 import { formatRelativeTime, formatNumber, getStatusColor } from "@/lib/utils"
+import { getCached, setCached, getPersistent } from "@/lib/cache"
+import { ProfileCard } from "@/components/profile-card"
+
+const DASHBOARD_CACHE_KEY = "dashboard_health_cache"
+const DASHBOARD_CACHE_TTL_MS = 60_000
+const CONNECTED_USERNAME_KEY = "connected_username"
+
+interface DashboardCache {
+  health: Record<string, ApiHealth | null>
+  pipeline: PipelineHealth | null
+}
 
 export default function DashboardPage() {
   const { token } = useAuth()
   const [health, setHealth] = useState<Record<string, ApiHealth | null>>({})
   const [pipeline, setPipeline] = useState<PipelineHealth | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profile, setProfile] = useState<Account | null>(null)
 
   useEffect(() => {
+    // Show cached data immediately (if fresh) so navigating back to the
+    // dashboard doesn't force a ~5s health-check spinner every time. This is
+    // purely a perceived-speed win - a fresh copy is always fetched below.
+    const cached = getCached<DashboardCache>(DASHBOARD_CACHE_KEY, DASHBOARD_CACHE_TTL_MS)
+    if (cached) {
+      setHealth(cached.health)
+      setPipeline(cached.pipeline)
+      setLoading(false)
+    }
+
     async function load() {
       try {
         const [h, a, c, cr, k, p] = await Promise.all([
@@ -27,13 +50,28 @@ export default function DashboardPage() {
           api.health.knowledge().catch(() => null),
           api.health.pipeline(token || undefined).catch(() => null),
         ])
-        setHealth({ main: h, analytics: a, content: c, creator: cr, knowledge: k })
+        const nextHealth = { main: h, analytics: a, content: c, creator: cr, knowledge: k }
+        setHealth(nextHealth)
         setPipeline(p)
+        setCached<DashboardCache>(DASHBOARD_CACHE_KEY, { health: nextHealth, pipeline: p })
       } finally {
         setLoading(false)
       }
     }
     load()
+  }, [token])
+
+  useEffect(() => {
+    // The connected account's username is stashed in localStorage by the
+    // /connect flow (there's no "primary account" endpoint this dashboard
+    // already calls) - reuse it here to show the profile card without a
+    // second round of Instagram ingestion.
+    const username = getPersistent(CONNECTED_USERNAME_KEY)
+    if (!username || !token) return
+    api.ingest
+      .getAccount(token, username)
+      .then((acct) => setProfile(acct))
+      .catch(() => setProfile(null))
   }, [token])
 
   return (
@@ -44,6 +82,33 @@ export default function DashboardPage() {
           Overview of your content strategy platform
         </p>
       </div>
+
+      {profile && <ProfileCard account={profile} className="animate-fade-in" />}
+
+      {!loading && (health.main?.reel_count ?? 0) === 0 && (
+        <Card className="animate-fade-in border-zinc-900 bg-zinc-900 text-white dark:border-zinc-50 dark:bg-zinc-50 dark:text-zinc-900">
+          <CardContent className="flex flex-col items-start justify-between gap-4 p-6 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-white/10 p-2.5 dark:bg-zinc-900/10">
+                <AtSign className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="font-medium">No Reels tracked yet</p>
+                <p className="text-sm text-zinc-300 dark:text-zinc-600">
+                  Connect an Instagram account to start chatting with its content
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/connect"
+              className={buttonVariants({ variant: "secondary", size: "sm", className: "shrink-0" })}
+            >
+              Connect Account
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
@@ -134,6 +199,7 @@ function PipelineStatusCard({
   loading: boolean
 }) {
   const [running, setRunning] = useState(false)
+  const { token } = useAuth()
 
   return (
     <Card className="animate-fade-in stagger-3">
@@ -206,7 +272,7 @@ function PipelineStatusCard({
                 setRunning(true)
                 try {
                   const { api } = await import("@/lib/api")
-                  await api.pipeline.run(token || undefined)
+                  await api.pipeline.run(token ?? "")
                 } finally {
                   setRunning(false)
                 }
@@ -284,9 +350,9 @@ function ServiceHealthCard({
                     ) : (
                       <span className="text-xs text-zinc-400">Unreachable</span>
                     )}
-                    {h?.last_run && (
+                    {h?.last_run_timestamp && (
                       <p className="text-[10px] text-zinc-400">
-                        {formatRelativeTime(h.last_run)}
+                        {formatRelativeTime(h.last_run_timestamp)}
                       </p>
                     )}
                   </div>

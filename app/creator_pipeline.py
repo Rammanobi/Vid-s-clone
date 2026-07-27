@@ -126,6 +126,13 @@ async def run_creator_intelligence_pipeline(
     start = time.monotonic()
     logger.info("creator_intelligence_pipeline_started")
 
+    # "default" is a sentinel, not a real Account.id - resolve it to the
+    # most recently ingested account instead of hardcoding a fake id.
+    if account_id == DEFAULT_ACCOUNT_ID:
+        resolved = await db.get_primary_account_id()
+        if resolved:
+            account_id = resolved
+
     try:
         intelligence = await build_creator_intelligence(
             db, account_id=account_id, limit=limit

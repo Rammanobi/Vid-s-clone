@@ -19,7 +19,9 @@
   },
   "homepage": "https://github.com/Rammanobi/Vid-s-clone#readme",
   "dependencies": {
-    "@prisma/client": "^6.19.3",
+    "@prisma/client": "^6.19.3"
+  },
+  "devDependencies": {
     "prisma": "^6.19.3"
   }
 }

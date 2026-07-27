@@ -71,9 +71,13 @@ HikerClient (httpx, rate-limited) → IngestionOrchestrator
 
 Rate-limited to avoid Hiker API throttling. Skips on API errors (logged, not fatal).
 
+> `views` is sourced from `play_count` and `shares` from `reshare_count` (not `view_count`/`share_count`, which HikerAPI never returns). `reach`, `impressions`, and any watch-time/retention/audience-retention metric are structurally unavailable from HikerAPI's public endpoints — they are owner-only Instagram Insights data this API does not expose — so they were removed from `ReelMetric` entirely rather than kept as permanently-null nullable fields.
+
 ## Enrichment Stage Detail
 
 `app/enrichment.py::enrich_reel()`
+
+> `videoUrl` values come from HikerAPI as signed CDN URLs (the `oe=` query parameter is a hex Unix expiry timestamp) and are time-limited. They must be downloaded promptly during enrichment, not cached long-term for later use — a stale `videoUrl` will 403/expire and has to be refreshed by re-fetching the media.
 
 ```
 1. Download video via httpx

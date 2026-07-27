@@ -83,7 +83,15 @@ class TestProcessSingleReel:
         }
         result = await process_single_reel(reel, mock_db)
         assert result.engagement_rate == 0.0
-        assert result.virality_score == 1.0
+        # virality_score = engagement_rate * 0.5 + (share_rate or 0.0) * 0.3
+        #                  + view_to_follower * 0.2
+        # views=0 zero-guards engagement_rate to 0.0, shares is absent so
+        # share_rate is None (treated as 0.0), and followerCount is absent
+        # so view_to_follower is 0.0 too:
+        #   0.0 * 0.5 + 0.0 * 0.3 + 0.0 * 0.2 = 0.0
+        # A reel nobody watched has no virality - the old formula's
+        # arbitrary +1.0 floor is gone.
+        assert result.virality_score == 0.0
 
     @pytest.mark.asyncio
     async def test_low_follower_volatility(self, mock_db: AsyncMock) -> None:
@@ -165,7 +173,14 @@ class TestRunAnalyticsPipeline:
             return_value=[{"id": "r1", "views": 100, "likes": 5, "commentsCount": 1}]
         )
         result = await run_analytics_pipeline(mock_db)
-        assert result["elapsed_sec"] > 0
+        # elapsed_sec is a real time.monotonic() delta. Processing a single
+        # mocked reel can finish in under a millisecond and round to 0.0 on
+        # a fast machine, so assert the field exists and is a non-negative
+        # float rather than strictly positive (asserting > 0 here is flaky,
+        # not a real invariant of the pipeline).
+        assert "elapsed_sec" in result
+        assert isinstance(result["elapsed_sec"], float)
+        assert result["elapsed_sec"] >= 0
 
 
 class TestSnapshotAllMetrics:
@@ -227,7 +242,13 @@ class TestSnapshotAllMetrics:
         assert call_kwargs["comments_count"] == 15
         assert call_kwargs["saves"] == 50
         assert call_kwargs["shares"] == 10
-        assert call_kwargs["reach"] == 8000
+        # reach was removed from insert_reel_snapshot's signature (see
+        # app/db.py::insert_reel_snapshot and
+        # openspec/changes/fix-hiker-ingestion/specs/reel-metrics/spec.md,
+        # "Reach and impressions are unavailable" - HikerAPI has no
+        # reach/impressions field for Reels). Even though the raw reel dict
+        # above still carries a stale "reach" key, it must not be forwarded.
+        assert "reach" not in call_kwargs
 
 
 class TestComputeMetricDecay:

@@ -1,5 +1,16 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Anchored to the repo root, not the process's CWD - load_dotenv() with no
+# path searches CWD, which is wrong whenever this app is launched with a
+# different working directory than the repo (e.g. uvicorn --app-dir from a
+# parent folder never finds .env and silently falls back to every default).
+# Must run before the class body: several fields below read os.environ at
+# class-definition time, not at instantiation.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 @dataclass(frozen=True)
@@ -89,6 +100,14 @@ class Settings:
     # Creator intelligence update interval
     creator_update_interval_hours: int = int(
         os.environ.get("CREATOR_UPDATE_INTERVAL_HOURS", "24")
+    )
+
+    # Background schedulers (creator_update_loop, pipeline_update_loop). Off by
+    # default: no scheduled path currently calls HikerAPI, but this is the hard
+    # switch so nothing runs unattended without an explicit opt-in.
+    schedulers_enabled: bool = field(
+        default_factory=lambda: os.environ.get("SCHEDULERS_ENABLED", "false").lower()
+        in ("1", "true", "yes")
     )
 
     # Redis

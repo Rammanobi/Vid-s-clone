@@ -22,6 +22,7 @@ from app.monitoring import (
     db_queries_total,
 )
 from app.llm import LLMClient
+from app.on_demand_enrichment import ensure_reels_transcribed
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    reel_count: int | None = None
 
 
 class CitationItem(BaseModel):
@@ -47,9 +49,14 @@ class ChatResponse(BaseModel):
     intent: dict[str, Any] | None = None
     evidence: dict[str, Any] | None = None
     elapsed_sec: float | None = None
+    transcription_status: list[dict[str, Any]] | None = None
 
 
-def _build_initial_state(session_id: str, message: str) -> GraphState:
+def _build_initial_state(
+    session_id: str,
+    message: str,
+    pinned_transcripts: list[dict[str, Any]] | None = None,
+) -> GraphState:
     return {
         "session_id": session_id,
         "user_query": message,
@@ -61,6 +68,7 @@ def _build_initial_state(session_id: str, message: str) -> GraphState:
         "analytics_context": None,
         "competitor_context": None,
         "retrieved_documents": None,
+        "pinned_transcripts": pinned_transcripts,
         "ranked_context": None,
         "confidence_score": None,
         "evidence": None,
@@ -75,9 +83,10 @@ async def _invoke_graph(
     message: str,
     db: DatabaseClient,
     llm: LLMClient | None,
+    pinned_transcripts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     start = time.monotonic()
-    initial = _build_initial_state(session_id, message)
+    initial = _build_initial_state(session_id, message, pinned_transcripts)
 
     try:
         result = await compiled_graph.ainvoke(
@@ -135,9 +144,37 @@ async def agent_chat(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database not available")
 
     await _validate_session(body.session_id, user, db)
+
+    transcription_status: list[dict[str, Any]] | None = None
+    pinned_transcripts: list[dict[str, Any]] | None = None
+    if body.reel_count and body.reel_count > 0:
+        try:
+            transcription_status = await ensure_reels_transcribed(db, body.reel_count)
+            logger.info(
+                "on_demand_transcription_batch_complete",
+                requested=body.reel_count,
+                processed=len(transcription_status),
+            )
+            # Pin these reels' transcripts directly into the graph state instead
+            # of letting them compete for a slot in hybrid_search's ranking -
+            # the user explicitly asked for these N reels to be analyzed, so
+            # their transcript must be guaranteed context, not "hopefully
+            # retrieved" (dense/embedding search never even sees them until a
+            # full pipeline re-run recomputes their embedding).
+            pinned_transcripts = [
+                {
+                    "instagram_reel_id": item.get("instagram_reel_id"),
+                    "transcript": item.get("transcript"),
+                }
+                for item in transcription_status
+                if item.get("transcript") and not item.get("error")
+            ] or None
+        except Exception as exc:
+            logger.warning("on_demand_transcription_batch_failed", error=str(exc))
+
     start = time.monotonic()
     llm = LLMClient()
-    result = await _invoke_graph(body.session_id, body.message, db, llm)
+    result = await _invoke_graph(body.session_id, body.message, db, llm, pinned_transcripts)
     elapsed = time.monotonic() - start
 
     raw_citations = result.get("citations") or []
@@ -149,6 +186,7 @@ async def agent_chat(
         intent=result.get("intent"),
         evidence=result.get("evidence"),
         elapsed_sec=round(elapsed, 3),
+        transcription_status=transcription_status,
     )
 
 

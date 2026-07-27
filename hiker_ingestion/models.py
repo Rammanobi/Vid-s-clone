@@ -37,6 +37,12 @@ class AccountData:
     following_count: int = 0
     posts_count: int = 0
     is_competitor: bool = False
+    full_name: str | None = None
+    biography: str | None = None
+    profile_pic_url: str | None = None
+    is_verified: bool = False
+    is_private: bool = False
+    external_url: str | None = None
 
 
 @dataclass
@@ -62,14 +68,15 @@ class ReelMetricData:
     comments_count: int = 0
     saves: int | None = None
     shares: int | None = None
-    reach: int | None = None
+    # ponytail: `reach` removed (6.4) - HikerAPI never returns it, keeping it
+    # nullable-forever just preserved the "always PARTIAL" bug in schema form.
     engagement_rate: float = 0.0
-    save_rate: float | None = None
-    share_rate: float | None = None
-    comment_rate: float | None = None
-    virality_score: float = 1.0
+    save_rate: float = 0.0
+    share_rate: float = 0.0
+    comment_rate: float = 0.0
+    virality_score: float = 0.0
     view_to_follower: float = 0.0
-    metric_quality: MetricQuality = MetricQuality.FULL
+    metric_quality: MetricQuality = MetricQuality.PARTIAL
     is_volatile: bool = False
 
 

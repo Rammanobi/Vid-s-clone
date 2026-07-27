@@ -1,8 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "vid-s-clone-api"
 version = "1.0.0"
 description = "FastAPI Gateway for Vid's Clone"
-requires-python = ">=3.12"
+# Floor is 3.11 (no 3.12-only syntax is used anywhere); Docker and CI target 3.12.
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.34,<1",
@@ -17,7 +22,14 @@ dependencies = [
     "langgraph>=0.4,<1",
     "langchain-core>=0.3,<1",
     "redis>=5.2,<6",
+    "python-dotenv>=1.0,<2",
+    "sentence-transformers>=3.0,<4",
 ]
+
+[tool.setuptools.packages.find]
+# Flat layout with several non-package top-level dirs (frontend, prisma, infra,
+# grafana, prometheus, openspec). Without this, setuptools auto-discovery aborts.
+include = ["app*", "hiker_ingestion*"]
 
 [project.optional-dependencies]
 dev = [

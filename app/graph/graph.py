@@ -2,6 +2,21 @@ from __future__ import annotations
 
 from typing import Literal
 
+import langchain
+
+# Compat shim: langchain 1.x removed the module-level `debug`/`verbose`
+# attributes, but langchain_core 0.3.x (pinned by this project's langgraph
+# version) still reads `langchain.debug`/`langchain.verbose` directly via
+# plain attribute access on every graph invocation (see
+# langchain_core.globals.get_debug/get_verbose). Without this, every
+# ainvoke() raises AttributeError before any node runs. This is a targeted
+# fix for the version gap, not a substitute for migrating off the
+# langchain_core 0.3.x line entirely (tracked as a separate change).
+if not hasattr(langchain, "debug"):
+    langchain.debug = False
+if not hasattr(langchain, "verbose"):
+    langchain.verbose = False
+
 from langgraph.graph import END, StateGraph
 
 from app.graph.nodes import (

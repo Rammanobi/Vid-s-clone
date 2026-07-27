@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   ChevronDown,
+  AtSign,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -21,6 +22,7 @@ import { useState } from "react"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/connect", label: "Connect", icon: AtSign },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/content", label: "Content", icon: Film },
   { href: "/pipeline", label: "Pipeline", icon: GitBranch },
@@ -31,8 +33,6 @@ const navItems = [
 export function Navbar() {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
-
-  if (pathname === "/login") return null
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-200 bg-white/80 backdrop-blur-lg dark:border-zinc-800 dark:bg-zinc-950/80">

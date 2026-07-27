@@ -33,10 +33,27 @@ class TestPipelineStages:
     async def test_ingestion_stage_failed(self) -> None:
         db = AsyncMock()
         from app.pipeline import run_ingestion_stage
+        from hiker_ingestion.client import HikerNotFoundError
 
-        result = await run_ingestion_stage(db, usernames=["test_user"])
+        # run_ingestion_stage constructs a real hiker_ingestion.client.HikerClient
+        # internally (it isn't injected), so without mocking it a "failure" test
+        # like this one would silently make a live call to the real Hiker API
+        # (confirmed: it used to ingest "test_user" and eat a real 404). Patch the
+        # class itself so construction raises the same error HikerClient raises
+        # for a real 404, which drives run_ingestion_stage into its top-level
+        # except block (the stage's failure-handling path) deterministically and
+        # with zero network I/O.
+        with patch(
+            "hiker_ingestion.client.HikerClient",
+            side_effect=HikerNotFoundError(
+                '{"detail":"Entries not found","exc_type":"NotFoundError"}'
+            ),
+        ):
+            result = await run_ingestion_stage(db, usernames=["test_user"])
+
         assert result.status == "failed"
         assert result.error is not None
+        assert "Entries not found" in result.error
 
     async def test_enrichment_stage_success(self) -> None:
         db = AsyncMock()

@@ -20,17 +20,31 @@ export function formatDuration(seconds: number): string {
   return `${s}s`
 }
 
-export function formatDate(date: string | Date): string {
+// Backend timestamps (e.g. `last_run_timestamp`) come from Python's
+// time.time() - epoch SECONDS, not JS's epoch milliseconds. A number below
+// this many digits can't be a millisecond timestamp in this century, so
+// treat it as seconds and scale up. ISO strings and Date objects pass through.
+function toJsDate(date: string | number | Date): Date {
+  if (typeof date === "number" && date < 1e12) {
+    return new Date(date * 1000)
+  }
+  return new Date(date)
+}
+
+export function formatDate(date: string | number | Date): string {
+  const d = toJsDate(date)
+  if (Number.isNaN(d.getTime())) return "—"
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(date))
+  }).format(d)
 }
 
-export function formatRelativeTime(date: string | Date): string {
-  const now = Date.now()
-  const diff = now - new Date(date).getTime()
+export function formatRelativeTime(date: string | number | Date): string {
+  const d = toJsDate(date)
+  if (Number.isNaN(d.getTime())) return "—"
+  const diff = Date.now() - d.getTime()
   const minutes = Math.floor(diff / 60000)
   const hours = Math.floor(diff / 3600000)
   const days = Math.floor(diff / 86400000)

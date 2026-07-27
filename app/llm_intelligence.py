@@ -9,27 +9,7 @@ from app.schema_validator import ContentIntelligenceSchema
 
 logger = get_logger(__name__)
 
-_SYSTEM_PROMPT = """You are a content analysis assistant. Analyze the given social media reel content and return a JSON object with exactly these fields (all optional, use null for unknown):
-
-{
-  "topic": "string or null (concise topic, max 100 chars)",
-  "hook_type": "string or null (one of: CURIOSITY, CONTRARIAN, STORY, PROBLEM_SOLUTION, QUESTION, OTHER)",
-  "hook_text": "string or null (the exact hook sentence, max 200 chars)",
-  "cta": "string or null (call to action text, max 200 chars)",
-  "content_format": "string or null (one of: TUTORIAL, BEHIND_THE_SCENES, TALKING_HEAD, SCREEN_RECORDING, SKIT, OTHER)",
-  "teaching_style": "string or null (e.g. step_by_step, explanatory, demonstration, conversational)",
-  "narrative_style": "string or null (e.g. storytelling, informational, persuasive, humorous)",
-  "audience_intent": "string or null (e.g. educational, entertaining, inspiring, promotional)",
-  "sentiment": "string or null (one of: positive, negative, neutral, mixed)",
-  "visual_style": "string or null (e.g. outdoor, studio, text_heavy, animated, cinematic)"
-}
-
-Rules:
-- hook_type must be one of the exact enum values listed above
-- content_format must be one of the exact enum values listed above
-- If the content is unclear for a field, use null
-- Be concise
-- Return ONLY valid JSON, no markdown"""
+from app.prompts import CONTENT_INTELLIGENCE_SYSTEM_PROMPT as _SYSTEM_PROMPT
 
 PARTIAL_INPUT_THRESHOLD = 2
 

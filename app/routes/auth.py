@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, status
 
 from app.auth import authenticate_admin, create_access_token, get_current_user
 from app.db import DatabaseClient
@@ -15,7 +15,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/token")
-async def login(username: str, password: str) -> dict[str, str]:
+async def login(
+    username: str = Form(...), password: str = Form(...)
+) -> dict[str, str]:
     if authenticate_admin(username, password):
         token = create_access_token(username)
         auth_attempts_total.labels(result="success").inc()

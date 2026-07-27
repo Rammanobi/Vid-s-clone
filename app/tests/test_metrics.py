@@ -3,6 +3,9 @@ from __future__ import annotations
 import pytest
 
 from app.metrics import (
+    VIRALITY_ENGAGEMENT_WEIGHT,
+    VIRALITY_SHARE_WEIGHT,
+    VIRALITY_VIEW_TO_FOLLOWER_WEIGHT,
     ReelMetricsResult,
     compute_audience_growth,
     compute_avg_watch_time,
@@ -121,45 +124,86 @@ class TestCommentRate:
 
 
 class TestViralityScore:
+    # compute_virality_score's contract changed (fix-hiker-ingestion, spec
+    # reel-metrics "Virality score formula"): it now takes the three
+    # already-computed, already-zero-guarded rates instead of raw counts, and
+    # combines them as engagement_rate*0.5 + share_rate*0.3 + view_to_follower*0.2.
+    # This makes it agree exactly with hiker_ingestion/mapper.py's formula
+    # (asserted below in test_matches_mapper_formula) instead of computing an
+    # unrelated median-of-ratios.
+
     def test_basic(self) -> None:
         score = compute_virality_score(
-            likes=500, comments=50, saves=30, shares=20, views=10000
+            engagement_rate=10.0, share_rate=0.5, view_to_follower=2.0
         )
-        ratios = [500 / 10000, 50 / 10000, 30 / 10000, 20 / 10000]
-        expected = round(sum(sorted(ratios)[1:-1]) / 2.0, 6)
-        assert score == expected
+        assert score == round(10.0 * 0.5 + 0.5 * 0.3 + 2.0 * 0.2, 4) == 5.55
 
     def test_zero_views(self) -> None:
+        # A reel with zero views has no engagement, share, or reach signal at
+        # all - all three inputs are already zero-guarded to 0.0 upstream, so
+        # the score is honestly 0.0. The old formula's arbitrary "+1.0 floor"
+        # no longer exists.
         score = compute_virality_score(
-            likes=500, comments=50, saves=30, shares=20, views=0
-        )
-        assert score == 1.0
-
-    def test_missing_saves(self) -> None:
-        score = compute_virality_score(
-            likes=500, comments=50, saves=None, shares=20, views=10000
-        )
-        ratios = [500 / 10000, 50 / 10000, 20 / 10000]
-        expected = round(sorted(ratios)[len(ratios) // 2], 6)
-        assert score == expected
-
-    def test_no_engagement(self) -> None:
-        score = compute_virality_score(
-            likes=0, comments=0, saves=0, shares=0, views=10000
+            engagement_rate=0.0, share_rate=0.0, view_to_follower=0.0
         )
         assert score == 0.0
 
-    def test_median_not_mean(self) -> None:
+    def test_missing_saves_share_rate_none(self) -> None:
+        # share_rate can be None (missing data, distinct from 0); the formula
+        # must coalesce it to 0.0 rather than raising.
         score = compute_virality_score(
-            likes=9000, comments=10, saves=8, shares=6, views=10000
+            engagement_rate=5.0, share_rate=None, view_to_follower=1.0
         )
-        ratios = [0.9, 0.001, 0.0008, 0.0006]
-        sorted_r = sorted(ratios)
-        n = len(sorted_r)
-        median = (sorted_r[n // 2 - 1] + sorted_r[n // 2]) / 2.0
-        mean = sum(ratios) / len(ratios)
-        assert score == round(median, 6)
-        assert score != round(mean, 6)
+        assert score == round(5.0 * 0.5 + 0.0 * 0.3 + 1.0 * 0.2, 4) == 2.7
+
+    def test_no_engagement(self) -> None:
+        score = compute_virality_score(
+            engagement_rate=0.0, share_rate=0.0, view_to_follower=0.0
+        )
+        assert score == 0.0
+
+    def test_each_weight_contributes_independently(self) -> None:
+        # Replaces test_median_not_mean (the old median-of-ratios behavior no
+        # longer exists). Validates the three weights are additive and
+        # distinct, not some other combination.
+        engagement_only = compute_virality_score(
+            engagement_rate=10.0, share_rate=0.0, view_to_follower=0.0
+        )
+        share_only = compute_virality_score(
+            engagement_rate=0.0, share_rate=10.0, view_to_follower=0.0
+        )
+        vtf_only = compute_virality_score(
+            engagement_rate=0.0, share_rate=0.0, view_to_follower=10.0
+        )
+        assert engagement_only == round(10.0 * VIRALITY_ENGAGEMENT_WEIGHT, 4) == 5.0
+        assert share_only == round(10.0 * VIRALITY_SHARE_WEIGHT, 4) == 3.0
+        assert vtf_only == round(10.0 * VIRALITY_VIEW_TO_FOLLOWER_WEIGHT, 4) == 2.0
+        # engagement contributes more than share, which contributes more than
+        # view-to-follower, for the same input magnitude - the weight ordering
+        # the spec requires.
+        assert engagement_only > share_only > vtf_only
+
+    def test_matches_mapper_formula(self) -> None:
+        # Reconciliation guard: app/metrics.py and hiker_ingestion/mapper.py
+        # were deliberately made to compute IDENTICAL virality scores from
+        # identical inputs (design.md Decision 7 / task 8.3). Nothing else
+        # currently asserts this - if either formula drifts, this test catches it.
+        from hiker_ingestion.mapper import (
+            VIRALITY_ENGAGEMENT_WEIGHT as MAPPER_ENGAGEMENT_WEIGHT,
+            VIRALITY_SHARE_WEIGHT as MAPPER_SHARE_WEIGHT,
+            VIRALITY_VIEW_TO_FOLLOWER_WEIGHT as MAPPER_VTF_WEIGHT,
+        )
+
+        assert VIRALITY_ENGAGEMENT_WEIGHT == MAPPER_ENGAGEMENT_WEIGHT
+        assert VIRALITY_SHARE_WEIGHT == MAPPER_SHARE_WEIGHT
+        assert VIRALITY_VIEW_TO_FOLLOWER_WEIGHT == MAPPER_VTF_WEIGHT
+
+        # Same worked example used in both modules' own self-checks.
+        er, sr, vtf = 4.0253, 0.6232, 7.9080
+        assert compute_virality_score(er, sr, vtf) == round(
+            er * MAPPER_ENGAGEMENT_WEIGHT + sr * MAPPER_SHARE_WEIGHT + vtf * MAPPER_VTF_WEIGHT,
+            4,
+        ) == 3.7812
 
 
 class TestViewToFollower:
@@ -366,7 +410,6 @@ class TestComputeReelMetrics:
             comments_count=50,
             saves=100,
             shares=50,
-            reach=15000,
             follower_count=5000,
             prev_follower_count=4000,
             duration_sec=60.0,
@@ -390,7 +433,10 @@ class TestComputeReelMetrics:
         )
         assert result.engagement_rate == 0.0
         assert result.comment_rate == 0.0
-        assert result.virality_score == 1.0
+        # Old formula floored virality_score at 1.0 for zero views; the new
+        # formula has no such floor - zero views, zero engagement, zero
+        # reach genuinely means zero virality.
+        assert result.virality_score == 0.0
 
     def test_missing_saves_shares(self) -> None:
         result = compute_reel_metrics(
@@ -483,7 +529,9 @@ class TestComputeReelMetricsEdgeCases:
         assert result.save_rate == 0.0
         assert result.share_rate == 0.0
         assert result.comment_rate == 0.0
-        assert result.virality_score == 1.0
+        # See test_zero_views above: no floor anymore, all-zero inputs
+        # correctly produce an all-zero virality_score.
+        assert result.virality_score == 0.0
         assert result.view_to_follower == 0.0
 
     def test_missing_all_optionals(self) -> None:
@@ -495,7 +543,9 @@ class TestComputeReelMetricsEdgeCases:
         )
         assert result.saves is None
         assert result.shares is None
-        assert result.reach is None
+        # `reach` was removed entirely from ReelMetricsResult (HikerAPI
+        # structurally never returns it) - it's not an attribute at all
+        # anymore, so there is nothing to assert None about.
         assert result.save_rate is None
         assert result.share_rate is None
         assert result.metric_quality == "PARTIAL"

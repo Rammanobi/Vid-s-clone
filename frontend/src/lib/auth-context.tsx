@@ -32,8 +32,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (stored && storedUser) {
       setToken(stored)
       setUser(storedUser)
+      setIsLoading(false)
+      return
     }
-    setIsLoading(false)
+
+    // No login page exists in this app - it's a single-admin local tool.
+    // Silently authenticate as the one configured account instead of
+    // showing a sign-in step for a "user" that isn't really a separate
+    // identity here.
+    const autoUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME
+    const autoPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD
+    if (autoUsername && autoPassword) {
+      api.auth
+        .login(autoUsername, autoPassword)
+        .then((result) => {
+          localStorage.setItem("auth_token", result.access_token)
+          localStorage.setItem("auth_user", autoUsername)
+          setToken(result.access_token)
+          setUser(autoUsername)
+        })
+        .catch(() => {
+          // Backend not reachable yet or credentials misconfigured - pages
+          // that need a token will show their own "sign in" error; nothing
+          // to recover here automatically.
+        })
+        .finally(() => setIsLoading(false))
+    } else {
+      setIsLoading(false)
+    }
   }, [])
 
   const login = async (username: string, password: string) => {
@@ -49,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("auth_user")
     setToken(null)
     setUser(null)
-    router.push("/login")
+    router.push("/dashboard")
   }
 
   return (

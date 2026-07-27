@@ -14,6 +14,16 @@ async def get_creator_knowledge(
     db: DatabaseClient,
     account_id: str = "default",
 ) -> dict[str, Any]:
+    # "default" is a sentinel, not a real Account.id (those are UUIDs) - this
+    # is a single-creator tool in practice, so resolve it to the most
+    # recently ingested account rather than requiring every caller to look
+    # it up first.
+    if account_id == "default":
+        resolved = await db.get_primary_account_id()
+        if not resolved:
+            return {}
+        account_id = resolved
+
     profile = await db.get_creator_profile(account_id)
     if not profile:
         return {}
@@ -57,12 +67,14 @@ async def get_analytics(
 async def hybrid_search(
     db: DatabaseClient,
     query: str,
+    query_embedding: list[float] | None = None,
     metadata_filters: dict[str, Any] | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     try:
         results = await db.search_reels_hybrid(
             query=query,
+            query_embedding=query_embedding,
             metadata_filters=metadata_filters,
             dense_limit=limit,
             sparse_limit=limit,

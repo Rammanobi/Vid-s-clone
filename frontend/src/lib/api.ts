@@ -75,20 +75,32 @@ export const api = {
   },
 
   agent: {
-    chat: (token: string, sessionId: string, message: string) =>
-      api.post<ChatResponse>("/agent/chat", { session_id: sessionId, message }, token),
+    chat: (token: string, sessionId: string, message: string, reelCount?: number) =>
+      api.post<ChatResponse>(
+        "/agent/chat",
+        reelCount ? { session_id: sessionId, message, reel_count: reelCount } : { session_id: sessionId, message },
+        token
+      ),
     graph: () => api.get<GraphInfo>("/agent/graph"),
   },
 
   pipeline: {
-    run: (token: string, stages?: string[]) =>
-      api.post<PipelineRunResponse>("/pipeline/run", undefined, token),
+    run: (token: string, stages?: string[]) => {
+      const query = stages && stages.length
+        ? `?${stages.map((s) => `stages=${encodeURIComponent(s)}`).join("&")}`
+        : ""
+      return api.post<PipelineRunResponse>(`/pipeline/run${query}`, undefined, token)
+    },
     stages: () => api.get<PipelineStagesResponse>("/pipeline/stages"),
   },
 
   ingest: {
-    account: (token: string, username: string) =>
-      api.post<{ status: string; account: Account }>("/ingest/account", { username }, token),
+    account: (token: string, username: string, maxReels?: number) =>
+      api.post<{ status: string; account: Account }>(
+        "/ingest/account",
+        maxReels ? { username, max_reels: maxReels } : { username },
+        token
+      ),
     getAccount: (token: string, username: string) =>
       api.get<Account>(`/ingest/account/${username}`, token),
     reels: (token: string, accountId: string) =>
@@ -96,6 +108,51 @@ export const api = {
     reel: (token: string, reelId: string) =>
       api.get<ReelDetail>(`/ingest/reel/${reelId}`, token),
   },
+
+  analytics: {
+    summary: (token: string, limit?: number) =>
+      api.get<AnalyticsSummary>(
+        `/analytics/summary${limit ? `?limit=${limit}` : ""}`,
+        token
+      ),
+  },
+
+  content: {
+    reels: (token: string, limit?: number) =>
+      api.get<ContentReelsResponse>(
+        `/content/reels${limit ? `?limit=${limit}` : ""}`,
+        token
+      ),
+  },
+}
+
+export interface TopReel {
+  id: string
+  instagram_reel_id: string
+  video_url: string | null
+  views: number
+  likes: number
+  engagement_rate: number
+  virality_score: number
+  posted_at: string | null
+  comments_count?: number
+  saves?: number
+  shares?: number
+  caption?: string | null
+}
+
+export interface AnalyticsSummary {
+  total_reels: number
+  total_accounts: number
+  avg_engagement_rate: number
+  avg_virality_score: number
+  total_views: number
+  total_likes: number
+  total_comments: number
+  total_saves: number
+  total_shares: number
+  top_reels: TopReel[]
+  reels: TopReel[]
 }
 
 export interface ApiHealth {
@@ -104,6 +161,10 @@ export interface ApiHealth {
   version?: string
   reel_count?: number
   last_run?: string | null
+  // Epoch seconds, or null if the stage has never run. `last_run` above is a
+  // status label ("never_run", "success", ...), not a timestamp - it can't be
+  // passed to a date formatter.
+  last_run_timestamp?: number | null
   intelligence_count?: number
   profile_exists?: boolean
   scheduler?: string
@@ -174,6 +235,15 @@ export interface ChatResponse {
   intent: string
   evidence: Record<string, unknown>
   elapsed_sec: number
+  transcription_status?: TranscriptionStatusItem[]
+}
+
+export interface TranscriptionStatusItem {
+  reel_id: string
+  instagram_reel_id?: string
+  transcript?: string
+  skipped?: boolean
+  error?: string
 }
 
 export interface GraphInfo {
@@ -189,6 +259,12 @@ export interface Account {
   followingCount?: number
   postsCount?: number
   isCompetitor?: boolean
+  fullName?: string
+  biography?: string
+  profilePicUrl?: string
+  isVerified?: boolean
+  isPrivate?: boolean
+  externalUrl?: string
 }
 
 export interface ReelsResponse {
@@ -218,6 +294,18 @@ export interface ReelDetail extends Reel {
   visualSummary?: string
   metrics?: ReelMetrics
   intelligence?: ContentIntelligence
+  // GET /ingest/reel/{instagram_reel_id} joins Reel + ReelMetric and returns
+  // these flat on the row (not nested under `metrics`) - see
+  // app/db.py::get_reel_by_instagram_id.
+  views?: number
+  likes?: number
+  saves?: number
+  shares?: number
+  engagementRate?: number
+  viralityScore?: number
+  saveRate?: number
+  shareRate?: number
+  commentRate?: number
 }
 
 export interface ReelMetrics {
@@ -237,4 +325,28 @@ export interface ContentIntelligence {
   contentFormat?: string
   sentiment?: string
   audienceIntent?: string
+}
+
+export interface ContentReel {
+  id: string
+  instagram_reel_id: string
+  video_url: string | null
+  caption: string | null
+  views: number
+  likes: number
+  comments_count: number
+  engagement_rate: number
+  virality_score: number
+  topic: string | null
+  hook_type: string | null
+  hook_text: string | null
+  cta: string | null
+  content_format: string | null
+  sentiment: string | null
+  posted_at: string | null
+}
+
+export interface ContentReelsResponse {
+  reels: ContentReel[]
+  count: number
 }

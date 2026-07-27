@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any
 
 from hiker_ingestion.client import HikerClient
 from hiker_ingestion.config import settings
 from hiker_ingestion.db import DatabaseClient
 from hiker_ingestion.logging_setup import configure_logging, get_logger
 from hiker_ingestion.mapper import (
+    _coerce_id,
+    _safe_int,
+    is_reel,
     map_account,
     map_account_snapshot,
     map_comment,
     map_metric,
     map_reel,
+    unwrap_clips,
+    unwrap_user,
 )
 from hiker_ingestion.monitoring import (
     accounts_fetched,
@@ -36,13 +42,14 @@ class IngestionOrchestrator:
         self.db = db_client
 
     async def ingest_account(
-        self, username: str, is_competitor: bool = False
+        self, user: dict[str, Any], is_competitor: bool = False
     ) -> str | None:
-        logger.info("ingesting_account", username=username)
-
-        raw = await self.hiker.fetch_user_by_username(username)
-        account_data = map_account(raw)
+        """Takes the ALREADY-UNWRAPPED profile object (the `user` value), not the
+        raw response. Reading `pk` off the raw response root is what left
+        instagram_id empty and aborted every ingestion run."""
+        account_data = map_account(user)
         account_data.is_competitor = is_competitor
+        logger.info("ingesting_account", username=account_data.username)
 
         db_id = await self.db.upsert_account(account_data)
 
@@ -53,7 +60,7 @@ class IngestionOrchestrator:
             last_successful_fetch.labels(data_type="account").set_to_current_time()
             logger.info(
                 "account_ingested",
-                username=username,
+                username=account_data.username,
                 db_id=db_id,
                 follower_count=account_data.follower_count,
             )
@@ -66,6 +73,7 @@ class IngestionOrchestrator:
         account_db_id: str,
         follower_count: int = 0,
         max_reels: int = 50,
+        max_comments: int = 200,
     ) -> None:
         logger.info(
             "ingesting_reels",
@@ -73,12 +81,24 @@ class IngestionOrchestrator:
             max_reels=max_reels,
         )
 
-        raw_clips = await self.hiker.fetch_user_clips_all(
+        raw_items = await self.hiker.fetch_user_clips_all(
             instagram_id, max_items=max_reels
         )
+        # The client returns raw `response.items` elements, each shaped
+        # {"media": {...}}. Re-wrap so the single tested unwrapper owns the
+        # double-nesting rule rather than duplicating it here.
+        clips = unwrap_clips({"response": {"items": raw_items}})
 
-        for clip in raw_clips:
+        for clip in clips:
             try:
+                if not is_reel(clip):
+                    logger.debug(
+                        "skipping_non_reel",
+                        product_type=clip.get("product_type"),
+                        media_type=clip.get("media_type"),
+                    )
+                    continue
+
                 reel_data = map_reel(clip, account_db_id)
                 reel_db_id = await self.db.upsert_reel(reel_data)
 
@@ -91,10 +111,19 @@ class IngestionOrchestrator:
                     await self.db.upsert_reel_metric(metric_data)
                     metrics_stored.inc()
 
-                    media_id = clip.get("pk", clip.get("id", ""))
-                    if media_id:
+                    # /v2/media/comments expects the COMPOSITE id
+                    # "{media_pk}_{owner_pk}" — confirmed by the recorded call
+                    # log (entries 5/9/13/17/21), and it equals media["id"].
+                    media_pk = _coerce_id(clip.get("pk"))
+                    composite_id = clip.get("id") or (
+                        f"{media_pk}_{instagram_id}" if media_pk else ""
+                    )
+                    if composite_id:
                         await self.ingest_comments(
-                            media_id, reel_db_id, instagram_id
+                            composite_id,
+                            reel_db_id,
+                            instagram_id,
+                            max_comments=max_comments,
                         )
 
                     last_successful_fetch.labels(
@@ -162,17 +191,22 @@ class IngestionOrchestrator:
             max_reels=max_reels,
         )
 
-        db_id = await self.ingest_account(username, is_competitor=False)
-        if not db_id:
-            logger.error("failed_to_create_account", username=username)
-            return
-
-        raw_user = await self.hiker.fetch_user_by_username(username)
-        instagram_id = str(raw_user.get("pk", ""))
-        follower_count = int(raw_user.get("follower_count", 0))
+        # Fetch once, unwrap once — the old code called fetch_user_by_username
+        # twice (once inside ingest_account, once here) and read `pk` off the
+        # raw response root both times, which is empty because the profile is
+        # nested under "user".
+        raw_response = await self.hiker.fetch_user_by_username(username)
+        user = unwrap_user(raw_response)
+        instagram_id = _coerce_id(user.get("pk"))
+        follower_count = _safe_int(user.get("follower_count"), 0)
 
         if not instagram_id:
             logger.error("missing_instagram_id", username=username)
+            return
+
+        db_id = await self.ingest_account(user, is_competitor=False)
+        if not db_id:
+            logger.error("failed_to_create_account", username=username)
             return
 
         await self.ingest_reels(
@@ -180,6 +214,7 @@ class IngestionOrchestrator:
             account_db_id=db_id,
             follower_count=follower_count,
             max_reels=max_reels,
+            max_comments=max_comments,
         )
 
         logger.info(

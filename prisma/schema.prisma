@@ -44,6 +44,12 @@ model Account {
   followingCount   Int              @default(0)
   postsCount       Int              @default(0)
   isCompetitor     Boolean          @default(false)
+  fullName         String?
+  biography        String?
+  profilePicUrl    String?
+  isVerified       Boolean          @default(false)
+  isPrivate        Boolean          @default(false)
+  externalUrl      String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -154,7 +160,9 @@ model ReelMetric {
   commentsCount      Int           @default(0)
   saves              Int?
   shares             Int?
-  reach              Int?
+  // reach removed: HikerAPI structurally never returns it (owner-only Insights
+  // metric, zero occurrences across every sampled payload) — see
+  // openspec/changes/fix-hiker-ingestion/design.md Decision 5.
 
   engagementRate     Float         @default(0.0)
   saveRate           Float?
@@ -183,7 +191,8 @@ model ReelSnapshot {
   commentsCount Int      @default(0)
   saves         Int?
   shares        Int?
-  reach         Int?
+  // reach removed alongside ReelMetric.reach — same reason, never returned by
+  // HikerAPI. Resolves the design doc's open question.
 
   snapshotAt    DateTime @default(now())
 

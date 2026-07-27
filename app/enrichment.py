@@ -6,9 +6,9 @@ from typing import Any
 from app.clip.extractor import extract_visual_features
 from app.config import settings
 from app.db import DatabaseClient
+from app.embeddings import embed_text
 from app.intelligence import extract_intelligence
 from app.logging_setup import get_logger
-from app.metrics import ReelMetricsResult, compute_reel_metrics
 from app.ocr.extractor import extract_text_overlays_with_frames
 from app.selector import (
     ModalityScores,
@@ -30,8 +30,14 @@ async def enrich_reel(
     frames: list[Any] | None = None,
     ocr_frame_texts: list[list[str]] | None = None,
     caption: str | None = None,
-    reel_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # ponytail: metrics computation used to live here too, gated on an
+    # optional `reel_data` param that enrich_pending_reels() never actually
+    # supplied - so every enrichment run recomputed engagement_rate etc. from
+    # views=0/likes=0 and overwrote whatever real values the ingestion or
+    # analytics stage had just written. Metrics belong solely to
+    # app/analytics.py's dedicated ANALYTICS stage, which reads real,
+    # already-stored counts via get_reels_with_metrics() - not here.
     result: dict[str, Any] = {
         "reel_id": reel_db_id,
         "transcript": None,
@@ -39,7 +45,6 @@ async def enrich_reel(
         "visual_features": None,
         "modality_decision": None,
         "content_intelligence": None,
-        "metrics": None,
     }
 
     speech_score = 0.0
@@ -87,6 +92,24 @@ async def enrich_reel(
                 transcript_json=transcript_data["transcript_json"],
             )
             result["transcript"] = transcript_data
+
+            try:
+                transcript_text = transcript_data["transcript"]
+                embedding_text = (
+                    f"{caption}. {transcript_text}" if caption else transcript_text
+                )
+                embedding = embed_text(embedding_text)
+                if embedding is not None:
+                    await db.update_reel_transcript_embedding(
+                        reel_db_id=reel_db_id,
+                        embedding=embedding,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "transcript_embedding_failed",
+                    reel=instagram_reel_id,
+                    error=str(exc),
+                )
     elif not decision.run_transcription:
         logger.debug("transcription_skipped_by_selector", reel=instagram_reel_id)
 
@@ -161,54 +184,6 @@ async def enrich_reel(
         visual_style=intelligence.visual_style,
     )
     result["content_intelligence"] = intelligence.model_dump(exclude={"reel_id"})
-
-    metrics = compute_reel_metrics(
-        reel_id=reel_db_id,
-        views=reel_data.get("views", 0) if reel_data else 0,
-        likes=reel_data.get("likes", 0) if reel_data else 0,
-        comments_count=reel_data.get("commentsCount", 0) if reel_data else 0,
-        saves=reel_data.get("saves") if reel_data else None,
-        shares=reel_data.get("shares") if reel_data else None,
-        reach=reel_data.get("reach") if reel_data else None,
-        follower_count=reel_data.get("followerCount") if reel_data else None,
-        prev_follower_count=reel_data.get("prevFollowerCount") if reel_data else None,
-        duration_sec=reel_data.get("durationSec") if reel_data else None,
-        avg_watch_time_sec=reel_data.get("avgWatchTimeSec") if reel_data else None,
-        posts_count=reel_data.get("postsCount") if reel_data else None,
-        prev_posts_count=reel_data.get("prevPostsCount") if reel_data else None,
-    )
-    await db.upsert_reel_metrics(
-        reel_db_id=reel_db_id,
-        views=metrics.views,
-        likes=metrics.likes,
-        comments_count=metrics.comments_count,
-        saves=metrics.saves,
-        shares=metrics.shares,
-        reach=metrics.reach,
-        engagement_rate=metrics.engagement_rate,
-        save_rate=metrics.save_rate,
-        share_rate=metrics.share_rate,
-        comment_rate=metrics.comment_rate,
-        virality_score=metrics.virality_score,
-        view_to_follower=metrics.view_to_follower,
-        metric_quality=metrics.metric_quality,
-        is_volatile=metrics.is_volatile,
-    )
-    result["metrics"] = {
-        "engagement_rate": metrics.engagement_rate,
-        "save_rate": metrics.save_rate,
-        "share_rate": metrics.share_rate,
-        "comment_rate": metrics.comment_rate,
-        "virality_score": metrics.virality_score,
-        "view_to_follower": metrics.view_to_follower,
-        "growth_rate": metrics.growth_rate,
-        "posting_frequency": metrics.posting_frequency,
-        "avg_watch_time_sec": metrics.avg_watch_time_sec,
-        "content_consistency": metrics.content_consistency,
-        "audience_growth": metrics.audience_growth,
-        "metric_quality": metrics.metric_quality,
-        "is_volatile": metrics.is_volatile,
-    }
 
     return result
 

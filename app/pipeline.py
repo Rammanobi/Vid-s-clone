@@ -230,6 +230,13 @@ async def run_knowledge_stage(
     try:
         from app.creator_pipeline import run_creator_intelligence_pipeline
 
+        # "default" is a sentinel, not a real Account.id - resolve it to the
+        # most recently ingested account instead of hardcoding a fake id.
+        if account_id == "default":
+            resolved = await db.get_primary_account_id()
+            if resolved:
+                account_id = resolved
+
         result = await run_creator_intelligence_pipeline(
             db,
             account_id=account_id,

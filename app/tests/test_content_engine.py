@@ -381,7 +381,15 @@ class TestRunContentIntelligencePipeline:
             mock_db, use_llm=False
         )
 
-        assert result["elapsed_sec"] > 0
+        # elapsed_sec is a real time.monotonic() delta. Processing a single
+        # mocked reel with use_llm=False (pure rule-based extraction) can
+        # finish in under a millisecond and round to 0.0 on a fast machine,
+        # so assert the field exists and is a non-negative float rather than
+        # strictly positive - a sleep() to force it above zero would just be
+        # gaming the assertion, not testing anything real.
+        assert "elapsed_sec" in result
+        assert isinstance(result["elapsed_sec"], float)
+        assert result["elapsed_sec"] >= 0
 
     async def test_passes_alternative_field_names(self) -> None:
         mock_db = AsyncMock()

@@ -29,7 +29,6 @@ async def process_single_reel(
         comments_count=reel.get("commentsCount", 0) or 0,
         saves=reel.get("saves"),
         shares=reel.get("shares"),
-        reach=reel.get("reach"),
         follower_count=reel.get("followerCount"),
         prev_follower_count=reel.get("prevFollowerCount"),
         duration_sec=reel.get("durationSec"),
@@ -44,7 +43,6 @@ async def process_single_reel(
         comments_count=metrics.comments_count,
         saves=metrics.saves,
         shares=metrics.shares,
-        reach=metrics.reach,
         engagement_rate=metrics.engagement_rate,
         save_rate=metrics.save_rate,
         share_rate=metrics.share_rate,
@@ -62,7 +60,6 @@ async def process_single_reel(
         comments_count=metrics.comments_count,
         saves=metrics.saves,
         shares=metrics.shares,
-        reach=metrics.reach,
     )
 
     logger.debug(
@@ -148,7 +145,6 @@ async def snapshot_all_metrics(
                 comments_count=reel.get("commentsCount", 0) or 0,
                 saves=reel.get("saves"),
                 shares=reel.get("shares"),
-                reach=reel.get("reach"),
             )
             if snapshot:
                 inserted += 1

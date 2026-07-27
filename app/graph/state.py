@@ -14,6 +14,7 @@ class GraphState(TypedDict):
     analytics_context: dict[str, Any] | None
     competitor_context: dict[str, Any] | None
     retrieved_documents: list[dict[str, Any]] | None
+    pinned_transcripts: list[dict[str, Any]] | None
     ranked_context: dict[str, Any] | None
     confidence_score: float | None
     evidence: dict[str, Any] | None

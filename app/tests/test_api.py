@@ -47,10 +47,14 @@ async def test_auth_me_with_token(admin_token: str) -> None:
 
 @pytest.mark.asyncio
 async def test_ingest_endpoint_requires_auth() -> None:
+    # /ingest/account now takes a JSON body {username, max_reels} rather than
+    # instagram_id/username query params - send a valid body so this test
+    # exercises the auth dependency specifically, not incidentally hitting a
+    # 422 for an unrelated reason.
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/ingest/account?instagram_id=test&username=test"
+            "/ingest/account", json={"username": "test"}
         )
         assert response.status_code == 401
 

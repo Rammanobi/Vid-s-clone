@@ -40,6 +40,10 @@ def create_app() -> FastAPI:
         version="1.0.0",
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url="/redoc" if settings.environment != "production" else None,
+        # `lifespan` (defined below) was never wired in - the DB pool, Redis,
+        # metrics server, startup pipeline and schedulers have never run in
+        # any environment. This is the actual fix, not a config issue.
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -113,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     except Exception as exc:
         logger.warning("startup_creator_intelligence_skipped", error=str(exc))
+    creator_task: asyncio.Task[Any] | None = None
     pipeline_task: asyncio.Task[Any] | None = None
     try:
         from app.pipeline import PipelineStage, run_pipeline
@@ -142,21 +147,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     except Exception as exc:
         logger.warning("startup_pipeline_skipped", error=str(exc))
-    try:
-        from app.scheduler import creator_update_loop, pipeline_update_loop
-
-        creator_task = asyncio.create_task(creator_update_loop(db_client))
-        pipeline_task = asyncio.create_task(pipeline_update_loop(db_client))
-        logger.info("schedulers_started")
-    except Exception as exc:
-        logger.warning("schedulers_failed", error=str(exc))
-    yield
-    if pipeline_task and not pipeline_task.done():
-        pipeline_task.cancel()
+    if settings.schedulers_enabled:
         try:
-            await pipeline_task
-        except asyncio.CancelledError:
-            pass
+            from app.scheduler import creator_update_loop, pipeline_update_loop
+
+            creator_task = asyncio.create_task(creator_update_loop(db_client))
+            pipeline_task = asyncio.create_task(pipeline_update_loop(db_client))
+            logger.info("schedulers_started")
+        except Exception as exc:
+            logger.warning("schedulers_failed", error=str(exc))
+    else:
+        logger.info("schedulers_disabled", reason="SCHEDULERS_ENABLED is not set")
+    yield
+    for task in (creator_task, pipeline_task):
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     if db_client:
         await db_client.close()
     await close_redis()

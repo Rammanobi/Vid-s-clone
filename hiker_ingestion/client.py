@@ -21,15 +21,18 @@ class HikerAPIError(Exception):
     pass
 
 
-class HikerRateLimitError(HikerAPIError):
-    pass
-
-
 class HikerAuthError(HikerAPIError):
     pass
 
 
 class HikerNotFoundError(HikerAPIError):
+    pass
+
+
+class HikerInsufficientFundsError(HikerAPIError):
+    """Raised on HTTP 402 with an InsufficientFunds body. Non-retryable — the
+    key's credits are exhausted, which more attempts cannot fix."""
+
     pass
 
 
@@ -68,27 +71,18 @@ class HikerClient:
             raise HikerNotFoundError(
                 f"Resource not found: {response.text}"
             )
-        if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After", "5")
-            raise HikerRateLimitError(
-                f"Rate limited. Retry after {retry_after}s: {response.text}"
-            )
+        if response.status_code == 402:
+            # ponytail: the only confirmed HikerAPI error body shape
+            # (research-endpoints.md §6) is {"exc_type": "InsufficientFunds", ...}
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            if body.get("exc_type") == "InsufficientFunds":
+                raise HikerInsufficientFundsError(
+                    f"HikerAPI credits exhausted: {response.text}"
+                )
         response.raise_for_status()
-
-    def _get_retry_decorator(self, endpoint: str):
-        return retry(
-            stop=stop_after_attempt(settings.max_retries),
-            wait=wait_exponential(
-                multiplier=settings.min_backoff_seconds,
-                min=settings.min_backoff_seconds,
-                max=settings.max_backoff_seconds,
-            ),
-            retry=retry_if_exception_type(
-                (httpx.TimeoutException, httpx.ConnectError, HikerRateLimitError)
-            ),
-            before_sleep=before_sleep_log(logger, 20),
-            reraise=True,
-        )
 
     async def _request(
         self, method: str, path: str, endpoint_label: str, **kwargs: Any
@@ -112,7 +106,7 @@ class HikerClient:
 
                 return response.json()
 
-            except (httpx.TimeoutException, httpx.ConnectError, HikerRateLimitError):
+            except (httpx.TimeoutException, httpx.ConnectError):
                 api_requests_total.labels(
                     endpoint=endpoint_label, status="retry"
                 ).inc()
@@ -163,76 +157,68 @@ class HikerClient:
     ) -> dict[str, Any]:
         return await self._request(
             "GET",
-            f"/v2/user/by/username?username={username}",
+            "/v2/user/by/username",
             endpoint_label="user_by_username",
+            params={"username": username, "safe_int": "true"},
         )
 
     async def fetch_user_clips(
-        self, user_id: str, max_id: str | None = None
+        self, user_id: str, page_id: str | None = None
     ) -> dict[str, Any]:
-        path = f"/v1/user/clips/chunk?user_id={user_id}"
-        if max_id:
-            path += f"&max_id={max_id}"
+        params = {"user_id": user_id, "safe_int": "true"}
+        if page_id:
+            params["page_id"] = page_id
         return await self._request(
-            "GET", path, endpoint_label="user_clips"
+            "GET", "/v2/user/clips", endpoint_label="user_clips", params=params
         )
 
     async def fetch_user_clips_all(
         self, user_id: str, max_items: int = 100
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        max_id: str | None = None
+        page_id: str | None = None
 
         while len(items) < max_items:
-            data = await self.fetch_user_clips(user_id, max_id)
-            chunk = data.get("items", data.get("clips", []))
+            data = await self.fetch_user_clips(user_id, page_id)
+            chunk = data.get("response", {}).get("items", [])
             if not chunk:
                 break
             items.extend(chunk)
-            max_id = data.get("max_id", data.get("next_page_id"))
-            if not max_id:
+            # ponytail: next_page_id is a top-level sibling of "response", not
+            # nested inside it (research-endpoints.md §4)
+            page_id = data.get("next_page_id")
+            if not page_id:
                 break
 
         return items[:max_items]
 
     async def fetch_media_comments(
-        self, media_id: str, end_cursor: str | None = None
+        self, media_id: str, page_id: str | None = None
     ) -> dict[str, Any]:
-        path = f"/v1/media/comments/chunk?media_id={media_id}"
-        if end_cursor:
-            path += f"&end_cursor={end_cursor}"
+        # `media_id` is sent verbatim as the `id` query param. Confirmed via the
+        # recorded call log (hikerapi_calls entries 5/9/13/17/21): this endpoint
+        # requires the COMPOSITE "{media_pk}_{owner_pk}" form, not the plain pk.
+        # The orchestrator constructs it before calling this method.
+        params = {"id": media_id, "safe_int": "true"}
+        if page_id:
+            params["page_id"] = page_id
         return await self._request(
-            "GET", path, endpoint_label="media_comments"
+            "GET", "/v2/media/comments", endpoint_label="media_comments", params=params
         )
 
     async def fetch_media_comments_all(
         self, media_id: str, max_comments: int = 500
     ) -> list[dict[str, Any]]:
-        comments: list[dict[str, Any]] = []
-        cursor: str | None = None
-
-        while len(comments) < max_comments:
-            data = await self.fetch_media_comments(media_id, cursor)
-            chunk = data.get("items", data.get("comments", []))
-            if not chunk:
-                break
-            comments.extend(chunk)
-            cursor = data.get("end_cursor", data.get("next_page_id"))
-            if not cursor:
-                break
-
+        # ponytail: first-page-only, per design non-goal — comments pagination
+        # was never validated beyond page 1 (research-endpoints.md §4)
+        data = await self.fetch_media_comments(media_id)
+        comments = data.get("response", {}).get("comments", [])
         return comments[:max_comments]
-
-    async def fetch_media_info(self, media_id: str) -> dict[str, Any]:
-        return await self._request(
-            "GET",
-            f"/v1/media/by/id?media_id={media_id}",
-            endpoint_label="media_info",
-        )
 
     async def fetch_media_by_code(self, code: str) -> dict[str, Any]:
         return await self._request(
             "GET",
-            f"/v2/media/info/by/code?code={code}",
+            "/v2/media/info/by/code",
             endpoint_label="media_by_code",
+            params={"code": code, "safe_int": "true"},
         )

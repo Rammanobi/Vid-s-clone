@@ -122,7 +122,6 @@ ReelMetric
 ├── commentsCount: Int
 ├── saves: Int?
 ├── shares: Int?
-├── reach: Int?
 ├── engagementRate: Float
 ├── saveRate: Float?
 ├── shareRate: Float?
@@ -143,7 +142,6 @@ ReelSnapshot             [time-series drift tracking]
 ├── commentsCount: Int
 ├── saves: Int?
 ├── shares: Int?
-├── reach: Int?
 ├── snapshotAt: DateTime
 └── @@index([reelId, snapshotAt])
 

@@ -1,5 +1,13 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Anchored to the repo root, not the process's CWD - see app/config.py for why.
+# Must run before the class body: several fields below read os.environ at
+# class-definition time, not at instantiation.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 @dataclass(frozen=True)

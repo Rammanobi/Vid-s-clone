@@ -23,6 +23,14 @@ def normalize_embedding(embedding: list[float]) -> list[float]:
     return [x / norm for x in embedding]
 
 
+def _vector_literal(embedding: list[float]) -> str:
+    """asyncpg has no built-in pgvector codec - a raw Python list sent as a
+    `::vector`-cast parameter fails with "expected str, got list". pgvector's
+    text input format is a literal '[0.1,0.2,...]' string, which the
+    `::vector` cast then parses server-side."""
+    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
 def _build_metadata_clause(
     filters: dict[str, Any] | None,
     param_offset: int = 2,
@@ -112,6 +120,12 @@ class DatabaseClient:
             max_size=self._max_size,
             max_queries=self._max_queries,
             max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
+            # Neon's pooled endpoint (`-pooler` host) runs PgBouncer in
+            # transaction mode, which does not support server-side prepared
+            # statements - asyncpg's default caching fails every query against
+            # it. Safe to disable unconditionally; it's a no-op cost on a
+            # direct connection.
+            statement_cache_size=0,
         )
         logger.info(
             "db_pool_created",
@@ -146,6 +160,35 @@ class DatabaseClient:
             )
             return dict(row) if row else None
 
+    async def get_primary_account_id(self) -> str | None:
+        """Resolves "the" account for this single-creator tool. This app is
+        not multi-tenant in practice (one real creator account, occasionally
+        a few competitor rows) - this replaces the old hardcoded "default"
+        account id, which is not a real UUID and never matched any row.
+
+        Prefers the most recently created account that actually HAS reels,
+        falling back to the most recent account overall only if none do.
+        Plain most-recent-created is not safe on its own: a partially-failed
+        ingestion (account created, reel fetch failed) leaves a real,
+        legitimate-looking Account row with zero reels that would otherwise
+        silently shadow the real primary account forever.
+        """
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            with_reels = await conn.fetchval(
+                """
+                SELECT a."id" FROM "Account" a
+                WHERE EXISTS (SELECT 1 FROM "Reel" r WHERE r."accountId" = a."id")
+                ORDER BY a."createdAt" DESC LIMIT 1
+                """
+            )
+            if with_reels:
+                return with_reels
+            return await conn.fetchval(
+                'SELECT "id" FROM "Account" ORDER BY "createdAt" DESC LIMIT 1'
+            )
+
     async def get_reels_by_account(
         self, account_id: str, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
@@ -168,7 +211,17 @@ class DatabaseClient:
             raise RuntimeError("Database pool not initialized")
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                'SELECT * FROM "Reel" WHERE "instagramReelId" = $1',
+                """
+                SELECT r.*,
+                       rm."views", rm."likes", rm."commentsCount",
+                       rm."saves", rm."shares",
+                       rm."engagementRate", rm."saveRate", rm."shareRate",
+                       rm."commentRate", rm."viralityScore", rm."viewToFollower",
+                       rm."metricQuality"
+                FROM "Reel" r
+                LEFT JOIN "ReelMetric" rm ON rm."reelId" = r."id"
+                WHERE r."instagramReelId" = $1
+                """,
                 instagram_reel_id,
             )
             return dict(row) if row else None
@@ -258,7 +311,10 @@ class DatabaseClient:
 
     async def ingest_account(
         self, instagram_id: str, username: str, follower_count: int = 0,
-        following_count: int = 0, posts_count: int = 0, is_competitor: bool = False
+        following_count: int = 0, posts_count: int = 0, is_competitor: bool = False,
+        full_name: str | None = None, biography: str | None = None,
+        profile_pic_url: str | None = None, is_verified: bool = False,
+        is_private: bool = False, external_url: str | None = None,
     ) -> dict[str, Any] | None:
         if not self._pool:
             raise RuntimeError("Database pool not initialized")
@@ -267,18 +323,28 @@ class DatabaseClient:
                 """
                 INSERT INTO "Account" (
                     "instagramId", "username", "followerCount",
-                    "followingCount", "postsCount", "isCompetitor"
-                ) VALUES ($1, $2, $3, $4, $5, $6)
+                    "followingCount", "postsCount", "isCompetitor",
+                    "fullName", "biography", "profilePicUrl",
+                    "isVerified", "isPrivate", "externalUrl"
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 ON CONFLICT ("instagramId")
                 DO UPDATE SET
                     "username" = EXCLUDED."username",
                     "followerCount" = EXCLUDED."followerCount",
                     "followingCount" = EXCLUDED."followingCount",
-                    "postsCount" = EXCLUDED."postsCount"
+                    "postsCount" = EXCLUDED."postsCount",
+                    "fullName" = EXCLUDED."fullName",
+                    "biography" = EXCLUDED."biography",
+                    "profilePicUrl" = EXCLUDED."profilePicUrl",
+                    "isVerified" = EXCLUDED."isVerified",
+                    "isPrivate" = EXCLUDED."isPrivate",
+                    "externalUrl" = EXCLUDED."externalUrl"
                 RETURNING "id", "instagramId", "username", "followerCount"
                 """,
                 instagram_id, username, follower_count,
                 following_count, posts_count, is_competitor,
+                full_name, biography, profile_pic_url,
+                is_verified, is_private, external_url,
             )
             return dict(row) if row else None
 
@@ -298,6 +364,21 @@ class DatabaseClient:
                 reel_db_id,
             )
         logger.debug("reel_transcript_updated", reel_id=reel_db_id)
+
+    async def update_reel_transcript_embedding(
+        self,
+        reel_db_id: str,
+        embedding: list[float],
+    ) -> None:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE "Reel" SET "transcriptEmbedding" = $1::vector WHERE "id" = $2',
+                _vector_literal(embedding),
+                reel_db_id,
+            )
+        logger.debug("reel_transcript_embedding_updated", reel_id=reel_db_id)
 
     async def update_reel_text_overlays(
         self,
@@ -427,7 +508,6 @@ class DatabaseClient:
         comments_count: int = 0,
         saves: int | None = None,
         shares: int | None = None,
-        reach: int | None = None,
         engagement_rate: float = 0.0,
         save_rate: float | None = None,
         share_rate: float | None = None,
@@ -444,14 +524,14 @@ class DatabaseClient:
                 """
                 INSERT INTO "ReelMetric" (
                     "reelId", "views", "likes", "commentsCount",
-                    "saves", "shares", "reach",
+                    "saves", "shares",
                     "engagementRate", "saveRate", "shareRate",
                     "commentRate", "viralityScore", "viewToFollower",
                     "metricQuality", "isVolatile"
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7,
-                    $8, $9, $10, $11, $12, $13,
-                    $14::"MetricQuality", $15
+                    $1, $2, $3, $4, $5, $6,
+                    $7, $8, $9, $10, $11, $12,
+                    $13::"MetricQuality", $14
                 )
                 ON CONFLICT ("reelId")
                 DO UPDATE SET
@@ -460,7 +540,6 @@ class DatabaseClient:
                     "commentsCount" = EXCLUDED."commentsCount",
                     "saves" = EXCLUDED."saves",
                     "shares" = EXCLUDED."shares",
-                    "reach" = EXCLUDED."reach",
                     "engagementRate" = EXCLUDED."engagementRate",
                     "saveRate" = EXCLUDED."saveRate",
                     "shareRate" = EXCLUDED."shareRate",
@@ -477,7 +556,6 @@ class DatabaseClient:
                 comments_count,
                 saves,
                 shares,
-                reach,
                 engagement_rate,
                 save_rate,
                 share_rate,
@@ -505,7 +583,6 @@ class DatabaseClient:
         comments_count: int = 0,
         saves: int | None = None,
         shares: int | None = None,
-        reach: int | None = None,
     ) -> dict[str, Any] | None:
         if not self._pool:
             raise RuntimeError("Database pool not initialized")
@@ -514,8 +591,8 @@ class DatabaseClient:
                 """
                 INSERT INTO "ReelSnapshot" (
                     "reelId", "views", "likes", "commentsCount",
-                    "saves", "shares", "reach"
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    "saves", "shares"
+                ) VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING "id", "reelId", "snapshotAt"
                 """,
                 reel_db_id,
@@ -524,7 +601,6 @@ class DatabaseClient:
                 comments_count,
                 saves,
                 shares,
-                reach,
             )
             result = dict(row) if row else None
             if result:
@@ -564,12 +640,16 @@ class DatabaseClient:
             rows = await conn.fetch(
                 """
                 SELECT r."id", r."instagramReelId", r."videoUrl",
-                       r."views", r."likes", r."commentsCount",
-                       r."saves", r."shares", r."reach",
+                       rm."views", rm."likes", rm."commentsCount",
+                       rm."saves", rm."shares",
+                       rm."engagementRate", rm."saveRate", rm."shareRate",
+                       rm."commentRate", rm."viralityScore", rm."viewToFollower",
+                       rm."metricQuality",
                        r."durationSec", r."postedAt",
                        a."followerCount", a."postsCount"
                 FROM "Reel" r
                 JOIN "Account" a ON r."accountId" = a."id"
+                LEFT JOIN "ReelMetric" rm ON rm."reelId" = r."id"
                 ORDER BY r."postedAt" DESC
                 LIMIT $1 OFFSET $2
                 """,
@@ -761,6 +841,15 @@ class DatabaseClient:
                 )
             return [dict(r) for r in rows]
 
+    async def get_reels_with_content_intelligence(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Alias for get_reels_with_full_intelligence, used by
+        GET /content/reels (reels joined with metrics + ContentIntelligence)."""
+        return await self.get_reels_with_full_intelligence(limit=limit, offset=offset)
+
     async def get_reels_with_full_intelligence(
         self,
         limit: int = 100,
@@ -772,8 +861,8 @@ class DatabaseClient:
             rows = await conn.fetch(
                 """
                 SELECT r."id", r."instagramReelId", r."videoUrl",
-                       r."views", r."likes", r."commentsCount",
-                       r."saves", r."shares", r."reach",
+                       rm."views", rm."likes", rm."commentsCount",
+                       rm."saves", rm."shares",
                        r."durationSec", r."postedAt",
                        r."caption", r."transcript",
                        a."followerCount", a."postsCount",
@@ -804,14 +893,14 @@ class DatabaseClient:
             raise RuntimeError("Database pool not initialized")
         query_vec = normalize_embedding(query_embedding)
 
-        filter_clause, filter_params, needs_ci = _build_metadata_clause(
+        filter_clause, filter_params, _needs_ci = _build_metadata_clause(
             metadata_filters, param_offset=3
         )
-        ci_join = (
-            'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'
-            if needs_ci
-            else ""
-        )
+        # ci."*" columns are always selected below regardless of filters, so
+        # the join must always be present too - it used to be conditional on
+        # `needs_ci` (only true for a "topic" filter), which broke with a
+        # missing-FROM-clause error on every unfiltered call.
+        ci_join = 'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'
         where = f'AND ({filter_clause})' if filter_clause else ""
 
         async with self._pool.acquire() as conn:
@@ -829,15 +918,17 @@ class DatabaseClient:
                   ci."hookText" AS hook_text,
                   ci."contentFormat" AS content_format,
                   ci."hookType" AS hook_type,
-                  1 - (r."combinedEmbedding" <=> $1::vector) AS retrieval_score
+                  -- combinedEmbedding is an unused/unpopulated visual-CLIP column;
+                  -- transcriptEmbedding is the real, working text-based dense-search column.
+                  1 - (r."transcriptEmbedding" <=> $1::vector) AS retrieval_score
                 FROM "Reel" r
                 {ci_join}
-                WHERE r."combinedEmbedding" IS NOT NULL
+                WHERE r."transcriptEmbedding" IS NOT NULL
                 {where}
-                ORDER BY r."combinedEmbedding" <=> $1::vector ASC
+                ORDER BY r."transcriptEmbedding" <=> $1::vector ASC
                 LIMIT $2
                 """,
-                query_vec,
+                _vector_literal(query_vec),
                 limit,
                 *filter_params,
             )
@@ -854,14 +945,11 @@ class DatabaseClient:
         if not query.strip():
             return []
 
-        filter_clause, filter_params, needs_ci = _build_metadata_clause(
+        filter_clause, filter_params, _needs_ci = _build_metadata_clause(
             metadata_filters, param_offset=3
         )
-        ci_join = (
-            'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'
-            if needs_ci
-            else ""
-        )
+        # Same always-select-ci-columns reasoning as search_reels_dense above.
+        ci_join = 'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'
         where = f'AND ({filter_clause})' if filter_clause else ""
         tsquery = "plainto_tsquery('english', $1)"
 

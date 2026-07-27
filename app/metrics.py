@@ -10,6 +10,13 @@ logger = get_logger(__name__)
 
 FOLLOWER_VOLATILITY_THRESHOLD = 100
 
+# Must match hiker_ingestion/mapper.py's VIRALITY_* constants and
+# openspec/changes/fix-hiker-ingestion/specs/reel-metrics/spec.md exactly —
+# this is the same formula computed via a second code path.
+VIRALITY_ENGAGEMENT_WEIGHT = 0.5
+VIRALITY_SHARE_WEIGHT = 0.3
+VIRALITY_VIEW_TO_FOLLOWER_WEIGHT = 0.2
+
 
 @dataclass
 class ReelMetricsResult:
@@ -19,7 +26,6 @@ class ReelMetricsResult:
     comments_count: int = 0
     saves: int | None = None
     shares: int | None = None
-    reach: int | None = None
     engagement_rate: float = 0.0
     save_rate: float | None = None
     share_rate: float | None = None
@@ -86,24 +92,20 @@ def compute_comment_rate(comments: int, views: int, comments_disabled: bool = Fa
 
 
 def compute_virality_score(
-    likes: int,
-    comments: int,
-    saves: int | None,
-    shares: int | None,
-    views: int,
+    engagement_rate: float,
+    share_rate: float | None,
+    view_to_follower: float,
 ) -> float:
-    if views <= 0:
-        return 1.0
-    ratios = []
-    ratios.append(likes / views)
-    ratios.append(comments / views)
-    if saves is not None and views > 0:
-        ratios.append(saves / views)
-    if shares is not None and views > 0:
-        ratios.append(shares / views)
-    if not ratios:
-        return 1.0
-    return round(statistics.median(ratios), 6)
+    # ponytail: reuses the three already-zero-guarded rates rather than
+    # re-deriving from raw counts, so this can't diverge from them and can't
+    # raise ZeroDivisionError itself. Matches
+    # hiker_ingestion/mapper.py::map_metric's viralityScore exactly.
+    return round(
+        engagement_rate * VIRALITY_ENGAGEMENT_WEIGHT
+        + (share_rate or 0.0) * VIRALITY_SHARE_WEIGHT
+        + view_to_follower * VIRALITY_VIEW_TO_FOLLOWER_WEIGHT,
+        4,
+    )
 
 
 def compute_view_to_follower(views: int, follower_count: int | None) -> float:
@@ -188,7 +190,6 @@ def compute_reel_metrics(
     comments_count: int = 0,
     saves: int | None = None,
     shares: int | None = None,
-    reach: int | None = None,
     follower_count: int | None = None,
     prev_follower_count: int | None = None,
     duration_sec: float | None = None,
@@ -219,15 +220,16 @@ def compute_reel_metrics(
 
     comment_rate, _ = compute_comment_rate(comments_count, views, comments_disabled)
 
-    virality_score = compute_virality_score(
-        likes, comments_count, saves, shares, views
-    )
-
     view_to_follower = compute_view_to_follower(views, follower_count)
 
+    virality_score = compute_virality_score(
+        engagement_rate, share_rate, view_to_follower
+    )
+
     growth_rate, gr_quality = compute_growth_rate(follower_count, prev_follower_count)
-    if gr_quality == "PARTIAL":
-        partial_flags.append("growth_rate")
+    # ponytail: growth_rate/gr_quality intentionally excluded from
+    # partial_flags — per spec, metricQuality is FULL/PARTIAL based only on
+    # views/likes/commentsCount/saves/shares, not follower-history fields.
 
     posting_frequency = compute_posting_frequency(
         posts_count, prev_posts_count, time_period_days
@@ -254,7 +256,6 @@ def compute_reel_metrics(
         comments_count=comments_count,
         saves=saves,
         shares=shares,
-        reach=reach,
         engagement_rate=engagement_rate,
         save_rate=save_rate,
         share_rate=share_rate,

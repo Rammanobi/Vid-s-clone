@@ -35,7 +35,9 @@ async def knowledge_health(
     profile = None
     if db_ok:
         try:
-            profile = await db.get_creator_profile("default")
+            primary_account_id = await db.get_primary_account_id()
+            if primary_account_id:
+                profile = await db.get_creator_profile(primary_account_id)
         except Exception:
             pass
 

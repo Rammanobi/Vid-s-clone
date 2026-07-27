@@ -25,7 +25,13 @@ class DatabaseClient:
 
     async def connect(self) -> None:
         self._pool = await asyncpg.create_pool(
-            self._dsn, min_size=1, max_size=10
+            self._dsn,
+            min_size=1,
+            max_size=10,
+            # Same PgBouncer transaction-mode requirement as app/db.py - the
+            # earlier live ingestion test likely only worked by luck since
+            # each query pattern was mostly unique to its own connection.
+            statement_cache_size=0,
         )
         logger.info("database_pool_created")
 
@@ -52,15 +58,23 @@ class DatabaseClient:
         query = """
             INSERT INTO "Account" (
                 "instagramId", "username", "followerCount",
-                "followingCount", "postsCount", "isCompetitor"
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                "followingCount", "postsCount", "isCompetitor",
+                "fullName", "biography", "profilePicUrl",
+                "isVerified", "isPrivate", "externalUrl"
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT ("instagramId")
             DO UPDATE SET
                 "username" = EXCLUDED."username",
                 "followerCount" = EXCLUDED."followerCount",
                 "followingCount" = EXCLUDED."followingCount",
                 "postsCount" = EXCLUDED."postsCount",
-                "isCompetitor" = EXCLUDED."isCompetitor"
+                "isCompetitor" = EXCLUDED."isCompetitor",
+                "fullName" = EXCLUDED."fullName",
+                "biography" = EXCLUDED."biography",
+                "profilePicUrl" = EXCLUDED."profilePicUrl",
+                "isVerified" = EXCLUDED."isVerified",
+                "isPrivate" = EXCLUDED."isPrivate",
+                "externalUrl" = EXCLUDED."externalUrl"
             RETURNING "id"
         """
         return await self._execute(
@@ -71,6 +85,12 @@ class DatabaseClient:
             account.following_count,
             account.posts_count,
             account.is_competitor,
+            account.full_name,
+            account.biography,
+            account.profile_pic_url,
+            account.is_verified,
+            account.is_private,
+            account.external_url,
             table="Account",
         )
 
@@ -114,11 +134,11 @@ class DatabaseClient:
         query = """
             INSERT INTO "ReelMetric" (
                 "reelId", "views", "likes", "commentsCount",
-                "saves", "shares", "reach",
+                "saves", "shares",
                 "engagementRate", "saveRate", "shareRate", "commentRate",
                 "viralityScore", "viewToFollower",
                 "metricQuality", "isVolatile"
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT ("reelId")
             DO UPDATE SET
                 "views" = EXCLUDED."views",
@@ -126,7 +146,6 @@ class DatabaseClient:
                 "commentsCount" = EXCLUDED."commentsCount",
                 "saves" = EXCLUDED."saves",
                 "shares" = EXCLUDED."shares",
-                "reach" = EXCLUDED."reach",
                 "engagementRate" = EXCLUDED."engagementRate",
                 "saveRate" = EXCLUDED."saveRate",
                 "shareRate" = EXCLUDED."shareRate",
@@ -145,7 +164,6 @@ class DatabaseClient:
             metric.comments_count,
             metric.saves,
             metric.shares,
-            metric.reach,
             metric.engagement_rate,
             metric.save_rate,
             metric.share_rate,

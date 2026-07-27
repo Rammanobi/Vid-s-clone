@@ -228,31 +228,51 @@ Server → Client (error):
 
 ## Ingestion
 
-### POST /ingest
+All `/ingest` endpoints require `Authorization: Bearer <token>`.
 
-Trigger ingestion for specific usernames.
+### POST /ingest/account
+
+Upsert a single account. Takes one username at a time (no batch `usernames` array); fields other than `instagram_id`/`username` are optional and default to `0`/`false`.
 
 ```
-Request:
-{
-  "usernames": ["user1", "user2"],
-  "max_reels": 50,
-  "max_comments": 200
-}
+Query:
+  instagram_id: string
+  username: string
+  follower_count: int (default 0)
+  following_count: int (default 0)
+  posts_count: int (default 0)
+  is_competitor: bool (default false)
 
 Response 200:
-{
-  "status": "completed",
-  "results": {
-    "user1": { "reels_ingested": 15, "comments_ingested": 120 },
-    "user2": { "reels_ingested": 22, "comments_ingested": 180 }
-  }
-}
+{ "status": "ok", "account": { ... } }
 ```
 
-### GET /ingest/status
+### GET /ingest/account/{username}
 
-Get current ingestion status.
+Get an account by username.
+
+```
+Response 200: { ... account fields ... }
+Response 404: account not found
+```
+
+### GET /ingest/account/{account_id}/reels
+
+List reels for an account.
+
+```
+Query: ?limit=20&offset=0
+Response 200: { "reels": [...], "limit": 20, "offset": 0, "count": 1 }
+```
+
+### GET /ingest/reel/{instagram_reel_id}
+
+Get a single reel by its Instagram reel ID.
+
+```
+Response 200: { ... reel fields ... }
+Response 404: reel not found
+```
 
 ## Pipeline
 

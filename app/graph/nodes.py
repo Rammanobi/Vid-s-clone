@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 from app.db import DatabaseClient
+from app.embeddings import embed_text
 from app.graph.registry import registry
 from app.graph.state import GraphState
 from app.graph.tools import get_conversation_memory
@@ -24,29 +25,11 @@ logger = get_logger(__name__)
 CLARIFYING_THRESHOLD = 0.5
 HIGH_CONFIDENCE_THRESHOLD = 0.8
 
-INTENT_EXTRACTION_SYSTEM_PROMPT = (
-    "Extract structured intent from a user's query about Instagram Reels content strategy. "
-    "Return JSON with keys: intent_type (one of: content_strategy, performance_analysis, "
-    "recommendation, trend_discovery, competitor_analysis, general), topic (string or null), "
-    "metric (string or null), time_range (string or null), comparison_type (string or null)."
-)
-
-QUERY_REWRITE_SYSTEM_PROMPT = (
-    "Rewrite the user's query into an optimized search query for finding relevant Instagram "
-    "Reels content. Focus on factual, searchable terms. Return JSON with a single key "
-    "'rewritten_query' containing the optimized query string."
-)
-
-REASONER_SYSTEM_PROMPT = (
-    "You are a content strategy analyst for Instagram Reels creators. Based on the evidence "
-    "provided, generate a clear, actionable answer. Base your answer strictly on the evidence. "
-    "If the evidence is insufficient, acknowledge limitations."
-)
-
-RECOMMENDATION_SYSTEM_PROMPT = (
-    "Based on the analysis and evidence, generate specific actionable recommendations for "
-    "content creation strategy. Return JSON with a single key 'recommendations' containing "
-    "an array of recommendation strings."
+from app.prompts import (  # noqa: F401  (re-exported for existing importers)
+    INTENT_EXTRACTION_SYSTEM_PROMPT,
+    QUERY_REWRITE_SYSTEM_PROMPT,
+    REASONER_SYSTEM_PROMPT,
+    RECOMMENDATION_SYSTEM_PROMPT,
 )
 
 
@@ -298,10 +281,12 @@ async def parallel_retrieval_node(
             )
         elif source_name == "hybrid_search":
             metadata_filters = state.get("metadata_filters")
+            query_embedding = embed_text(rewritten_query)
             tasks[source_name] = asyncio.create_task(
                 registry.execute(
                     source_name, db,
                     query=rewritten_query,
+                    query_embedding=query_embedding,
                     metadata_filters=metadata_filters,
                 )
             )
@@ -423,8 +408,15 @@ async def context_fusion_node(
         ranked_context["reranked_candidates"] = reranked_candidates
         ranked_context["reranker_top_k"] = prev_ranked.get("reranker_top_k", RERANKER_TOP_K)
 
+    # Reels the user explicitly asked to have transcribed this turn - these
+    # bypass reranking entirely (see app/routes/agent.py) so they can never be
+    # dropped by the top-5 similar_reels cut above.
+    pinned_transcripts = state.get("pinned_transcripts")
+    if pinned_transcripts:
+        ranked_context["pinned_transcripts"] = pinned_transcripts
+
     ranked_context["source_count"] = len(ranked_context)
-    ranked_context["total_documents"] = len(retrieved_documents)
+    ranked_context["total_documents"] = len(retrieved_documents) + len(pinned_transcripts or [])
 
     logger.debug(
         "context_fused",
@@ -467,6 +459,11 @@ async def confidence_evaluation_node(
         score += 0.15
     if ranked_context.get("creator_profile"):
         score += 0.15
+    if ranked_context.get("pinned_transcripts"):
+        # The user explicitly named these reels for this turn - a real
+        # Whisper transcript in hand is stronger grounding than a reel that
+        # merely won the retrieval ranking, so it's weighted accordingly.
+        score += 0.3
 
     confidence_score = round(min(score, 1.0), 4)
 
@@ -797,6 +794,9 @@ def _build_summary(
 
 def _summarize_context(context: dict[str, Any]) -> str:
     parts: list[str] = []
+    pinned = context.get("pinned_transcripts")
+    if pinned:
+        parts.append(f"I transcribed {len(pinned)} reel(s) you selected and can reference their content directly.")
     analytics = context.get("analytics")
     if analytics and analytics.get("reel_count", 0) > 0:
         parts.append(
@@ -813,6 +813,15 @@ def _summarize_context(context: dict[str, Any]) -> str:
 
 def _format_context_for_llm(context: dict[str, Any]) -> str:
     lines: list[str] = []
+
+    pinned = context.get("pinned_transcripts")
+    if pinned:
+        lines.append("USER-SELECTED REEL TRANSCRIPTS (analyze these directly - the user asked for these specific reels):")
+        for reel in pinned:
+            lines.append(f"  - Reel {reel.get('instagram_reel_id', 'unknown')}:")
+            lines.append(f"    \"{reel.get('transcript', '')}\"")
+        lines.append("")
+
     creator = context.get("creator_profile")
     if creator:
         lines.append("CREATOR PROFILE:")
@@ -862,6 +871,10 @@ def _fallback_reasoning(query: str, context: dict[str, Any]) -> str:
     analytics = context.get("analytics")
     creator = context.get("creator_profile")
     parts: list[str] = []
+
+    pinned = context.get("pinned_transcripts")
+    if pinned:
+        parts.append(f"I transcribed {len(pinned)} reel(s) you selected but couldn't reach the LLM to analyze the transcript content directly.")
 
     if analytics and analytics.get("reel_count", 0) > 0:
         parts.append(

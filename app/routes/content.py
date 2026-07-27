@@ -3,8 +3,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
+from app.auth import get_current_user
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
@@ -83,4 +84,50 @@ async def content_health(
         "last_run_duration_sec": _LAST_RUN["duration_sec"],
         "last_run_reels_processed": _LAST_RUN["reels_processed"],
         "version": "1.0.0",
+    }
+
+
+@router.get("/reels")
+async def content_reels(
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: DatabaseClient = Depends(get_db_dependency),
+    user: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """List reels with metrics + content intelligence (topic, hook type,
+    format, etc.) for the frontend's Content page - previously this page
+    rendered a hardcoded placeholder array with no backend endpoint at all."""
+    reels = (
+        await db.get_reels_with_content_intelligence(limit=limit, offset=offset)
+        if db is not None
+        else []
+    )
+
+    http_requests_total.labels(
+        method="GET", endpoint="/content/reels", status="200"
+    ).inc()
+
+    return {
+        "reels": [
+            {
+                "id": r.get("id"),
+                "instagram_reel_id": r.get("instagramReelId"),
+                "video_url": r.get("videoUrl"),
+                "caption": r.get("caption"),
+                "views": r.get("views", 0) or 0,
+                "likes": r.get("likes", 0) or 0,
+                "comments_count": r.get("commentsCount", 0) or 0,
+                "engagement_rate": r.get("engagementRate") or 0.0,
+                "virality_score": r.get("viralityScore") or 0.0,
+                "topic": r.get("topic"),
+                "hook_type": r.get("hookType"),
+                "hook_text": r.get("hookText"),
+                "cta": r.get("cta"),
+                "content_format": r.get("contentFormat"),
+                "sentiment": r.get("sentiment"),
+                "posted_at": r.get("postedAt").isoformat() if r.get("postedAt") else None,
+            }
+            for r in reels
+        ],
+        "count": len(reels),
     }

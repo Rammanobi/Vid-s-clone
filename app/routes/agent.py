@@ -209,7 +209,7 @@ async def agent_chat_stream(
     user: str = Depends(get_current_user),
 ) -> StreamingResponse:
     if db is None:
-        raise HTTPException(status_code=503, detail="Database not available")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database not available")
 
     await _validate_session(body.session_id, user, db)
 

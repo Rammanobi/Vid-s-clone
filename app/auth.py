@@ -65,6 +65,33 @@ def decode_access_token(token: str) -> dict[str, object]:
         )
 
 
+def verify_token(token: str) -> dict[str, object]:
+    """Verify and decode a JWT token, raising PyJWTError on failure.
+
+    Unlike decode_access_token(), this does NOT raise HTTPException,
+    allowing callers (like WebSocket handlers) to handle errors directly.
+    This is the appropriate choice for WebSocket auth where we can't use
+    HTTP status codes.
+
+    Args:
+        token: JWT token string to verify
+
+    Returns:
+        Decoded token payload as dictionary
+
+    Raises:
+        RuntimeError: If JWT_SECRET is not configured
+        jwt.ExpiredSignatureError: If token has expired
+        jwt.PyJWTError: If token is invalid
+    """
+    if not settings.jwt_secret:
+        raise RuntimeError("JWT_SECRET is not configured")
+
+    return pyjwt.decode(
+        token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+    )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> str:

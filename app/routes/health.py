@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth import get_current_user
 from app.cache import get_redis
@@ -31,10 +31,17 @@ async def health(
     except Exception:
         redis_ok = False
 
-    status_code = "healthy" if db_ok and redis_ok else "degraded"
+    is_healthy = db_ok and redis_ok
+    status_code = "healthy" if is_healthy else "degraded"
     http_requests_total.labels(
         method="GET", endpoint="/health", status=status_code
     ).inc()
+
+    if not is_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="One or more health checks failed",
+        )
 
     return {
         "status": status_code,

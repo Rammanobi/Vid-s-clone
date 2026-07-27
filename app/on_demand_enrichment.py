@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -17,7 +18,24 @@ logger = get_logger(__name__)
 # root. Created lazily so importing this module never fails on a read-only
 # or ephemeral filesystem until it's actually needed.
 RECORDINGS_DIR = Path("data/reel_recordings")
-RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _ensure_recordings_dir() -> Path:
+    """Ensure recordings directory exists, creating if needed.
+
+    Lazy loading allows the app to start even on read-only filesystems,
+    only failing if transcription is actually attempted.
+    """
+    try:
+        RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+        return RECORDINGS_DIR
+    except OSError as exc:
+        logger.error(
+            "recordings_dir_creation_failed",
+            path=str(RECORDINGS_DIR),
+            error=str(exc),
+        )
+        raise
 
 
 async def transcribe_reel_on_demand(
@@ -62,6 +80,7 @@ async def transcribe_reel_on_demand(
         video_path = await download_video(video_url)
 
         audio_fd, audio_path_str = tempfile.mkstemp(suffix=".wav")
+        os.close(audio_fd)  # Close immediately - we only need the path
         audio_path = Path(audio_path_str)
         extract_audio(video_path, audio_path)
 
@@ -76,7 +95,9 @@ async def transcribe_reel_on_demand(
         transcript_json = [seg.model_dump() for seg in result.segments]
         transcript = result.full_text
 
-        dest_dir = RECORDINGS_DIR / (instagram_reel_id or str(reel_id))
+        # Lazy-create directory before using it
+        recordings_dir = await _ensure_recordings_dir()
+        dest_dir = recordings_dir / (instagram_reel_id or str(reel_id))
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_video = dest_dir / "video.mp4"
         dest_audio = dest_dir / "audio.wav"

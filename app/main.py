@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,12 +47,32 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Configure CORS based on environment
+    # Production: require explicit CORS_ORIGINS config
+    # Development: allow localhost variants
+    cors_origins: list[str] = []
+    if settings.environment == "production":
+        # Production: use configured origins or default to no cross-origin requests
+        cors_origins_str = os.environ.get("CORS_ORIGINS", "")
+        if cors_origins_str:
+            cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+        else:
+            logger.warning("CORS_ORIGINS not configured in production - cross-origin requests disabled")
+    else:
+        # Development: allow common localhost variants
+        cors_origins = [
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000",
+        ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=cors_origins,
+        allow_credentials=True if cors_origins else False,  # Only if origins specified
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
     )
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)

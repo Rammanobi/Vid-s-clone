@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ async def process_video(
     try:
         video_path = await download_video(video_url)
         audio_fd, audio_path_str = tempfile.mkstemp(suffix=".wav")
+        os.close(audio_fd)  # Close immediately - we only need the path
         audio_path = Path(audio_path_str)
 
         extract_audio(video_path, audio_path)
@@ -79,6 +81,7 @@ async def process_video_with_audio(
 
     try:
         audio_fd, audio_path_str = tempfile.mkstemp(suffix=".wav")
+        os.close(audio_fd)  # Close immediately - we only need the path
         audio_path = Path(audio_path_str)
         with open(audio_path, "wb") as f:
             f.write(audio_bytes)

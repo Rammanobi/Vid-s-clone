@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
@@ -50,16 +50,21 @@ async def knowledge_health(
     if consecutive_failures >= ALERT_THRESHOLD:
         alerts.append("scheduler_excessive_failures")
 
-    status = "healthy"
-    if not db_ok or consecutive_failures >= ALERT_THRESHOLD:
-        status = "degraded"
+    is_healthy = db_ok and consecutive_failures < ALERT_THRESHOLD
+    status_str = "healthy" if is_healthy else "degraded"
 
     http_requests_total.labels(
-        method="GET", endpoint="/knowledge/health", status=status
+        method="GET", endpoint="/knowledge/health", status=status_str
     ).inc()
 
+    if not is_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Knowledge health check failed",
+        )
+
     return {
-        "status": status,
+        "status": status_str,
         "database": "connected" if db_ok else "unavailable",
         "reel_count": reel_count,
         "profile_exists": profile is not None,

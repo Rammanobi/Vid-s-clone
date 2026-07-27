@@ -3,7 +3,7 @@ from __future__ import annotations
 import statistics
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import get_current_user
 from app.db import DatabaseClient
@@ -58,13 +58,20 @@ async def analytics_health(
     db_ok = await db.health() if db is not None else False
     reel_count = await db.get_reel_count() if db_ok else 0
 
-    status = "healthy" if db_ok else "degraded"
+    is_healthy = db_ok
+    status_str = "healthy" if is_healthy else "degraded"
     http_requests_total.labels(
-        method="GET", endpoint="/analytics/health", status=status
+        method="GET", endpoint="/analytics/health", status=status_str
     ).inc()
 
+    if not is_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Analytics health check failed",
+        )
+
     return {
-        "status": status,
+        "status": status_str,
         "database": "connected" if db_ok else "unavailable",
         "reel_count": reel_count,
         "last_run": _LAST_RUN["status"],

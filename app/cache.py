@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Callable
 from functools import wraps
@@ -103,7 +104,18 @@ def cached(ttl: int = 300, key_prefix: str = "") -> Callable:
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            cache_key = f"{key_prefix or func.__name__}:{hash(frozenset(kwargs.items()))}"
+            # Create stable hash of kwargs using JSON serialization
+            # Using hash() is unsafe: different kwargs can collide to same hash value
+            # Using MD5 ensures different inputs produce different keys
+            try:
+                # Sort kwargs for consistent ordering
+                kwargs_sorted = json.dumps(kwargs, sort_keys=True, default=str)
+                kwargs_hash = hashlib.md5(kwargs_sorted.encode()).hexdigest()[:8]
+            except (TypeError, ValueError):
+                # If kwargs not JSON serializable, fall back to repr
+                kwargs_hash = hashlib.md5(repr(kwargs).encode()).hexdigest()[:8]
+
+            cache_key = f"{key_prefix or func.__name__}:{kwargs_hash}"
             cached_result = await cache_get(cache_key)
             if cached_result is not None:
                 return cached_result

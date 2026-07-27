@@ -1,4 +1,5 @@
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -102,6 +103,11 @@ class Settings:
         os.environ.get("CREATOR_UPDATE_INTERVAL_HOURS", "24")
     )
 
+    # Pipeline update interval
+    pipeline_update_interval_hours: int = int(
+        os.environ.get("PIPELINE_UPDATE_INTERVAL_HOURS", "12")
+    )
+
     # Background schedulers (creator_update_loop, pipeline_update_loop). Off by
     # default: no scheduled path currently calls HikerAPI, but this is the hard
     # switch so nothing runs unattended without an explicit opt-in.
@@ -124,6 +130,44 @@ class Settings:
     db_pool_max_lifetime: int = int(
         os.environ.get("DB_POOL_MAX_LIFETIME", "3600")
     )
+
+    def __post_init__(self) -> None:
+        """Validate security-critical settings.
+
+        In production, raise errors for missing credentials.
+        In development, issue warnings but allow startup.
+        """
+        if self.environment == "production":
+            errors: list[str] = []
+
+            if not self.jwt_secret:
+                errors.append(
+                    "JWT_SECRET must be set in production (currently empty)"
+                )
+            if not self.admin_password_hash:
+                errors.append(
+                    "ADMIN_PASSWORD_HASH must be set in production (currently empty)"
+                )
+
+            if errors:
+                raise ValueError(
+                    f"Production configuration errors:\n- "
+                    + "\n- ".join(errors)
+                )
+        else:
+            # Development: warn about missing secrets
+            if not self.jwt_secret:
+                warnings.warn(
+                    "JWT_SECRET not configured - tokens will fail",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            if not self.admin_password_hash:
+                warnings.warn(
+                    "ADMIN_PASSWORD_HASH not configured - login will fail",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
 
 settings = Settings()

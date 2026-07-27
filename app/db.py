@@ -53,7 +53,10 @@ def _build_metadata_clause(
     if time_range:
         days = _parse_time_range_days(time_range)
         if days is not None:
-            parts.append(f'r."postedAt" >= NOW() - INTERVAL \'${idx} days\'')
+            # Use INTERVAL multiplication to properly parameterize days value
+            # WRONG: INTERVAL '$X days' (parameter inside literal, never substituted)
+            # RIGHT: (INTERVAL '1 day' * $X) (parameter used as multiplier)
+            parts.append(f'r."postedAt" >= NOW() - (INTERVAL \'1 day\' * ${idx})')
             params.append(days)
             idx += 1
 

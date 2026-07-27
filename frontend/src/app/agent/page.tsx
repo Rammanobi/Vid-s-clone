@@ -138,7 +138,7 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-12rem)] min-h-[420px] flex-col space-y-4">
+    <div className="flex min-h-[420px] flex-col space-y-4">
       <div className="animate-fade-in">
         <h1 className="text-3xl font-bold tracking-tight">AI Agent</h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">

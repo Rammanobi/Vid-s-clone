@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.cache import cache_delete, cache_get, cache_set
@@ -12,6 +13,19 @@ from app.logging_setup import get_logger
 from app.monitoring import db_queries_total
 
 logger = get_logger(__name__)
+
+
+class UpdateSessionSummaryRequest(BaseModel):
+    """Request body for updating session summary."""
+    summary: str
+
+
+class AddChatMessageRequest(BaseModel):
+    """Request body for adding a chat message."""
+    role: str
+    content: str
+    citations: list[dict[str, Any]] | None = None
+
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -105,7 +119,7 @@ async def list_sessions(
 @router.put("/{session_id}/summary")
 async def update_session_summary(
     session_id: str,
-    summary: str,
+    body: UpdateSessionSummaryRequest = Body(...),
     db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -127,7 +141,7 @@ async def update_session_summary(
             detail="Not authorized to modify this session",
         )
 
-    updated = await db.update_session_summary(session_id, summary)
+    updated = await db.update_session_summary(session_id, body.summary)
     db_queries_total.labels(operation="update_session_summary").inc()
 
     await cache_delete(f"session:{session_id}")
@@ -138,9 +152,7 @@ async def update_session_summary(
 @router.post("/{session_id}/messages")
 async def add_chat_message(
     session_id: str,
-    role: str,
-    content: str,
-    citations: list[dict[str, Any]] | None = None,
+    body: AddChatMessageRequest = Body(...),
     db: DatabaseClient = Depends(get_db_dependency),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -162,7 +174,9 @@ async def add_chat_message(
             detail="Not authorized to modify this session",
         )
 
-    message = await db.create_chat_message(session_id, role, content, citations)
+    message = await db.create_chat_message(
+        session_id, body.role, body.content, body.citations
+    )
     db_queries_total.labels(operation="create_message").inc()
 
     return {"status": "ok", "message": message}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import get_current_user
 from app.db import DatabaseClient
@@ -59,23 +59,27 @@ async def content_health(
     intelligence_count = 0
     if db_ok:
         try:
-            reels = await db.get_reels_with_metrics(limit=999999)
-            all_metrics_result = await db.get_reel_metrics(
-                [r["id"] for r in reels]
-            )
+            reels_with_intel = await db.get_reels_with_content_intelligence(limit=100)
             intelligence_count = sum(
-                1 for m in all_metrics_result if m.get("content_intelligence_id") is not None
+                1 for r in reels_with_intel if r.get("topic") is not None
             )
         except Exception:
             pass
 
-    status = "healthy" if db_ok else "degraded"
+    is_healthy = db_ok
+    status_str = "healthy" if is_healthy else "degraded"
     http_requests_total.labels(
-        method="GET", endpoint="/content/health", status=status
+        method="GET", endpoint="/content/health", status=status_str
     ).inc()
 
+    if not is_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Content health check failed",
+        )
+
     return {
-        "status": status,
+        "status": status_str,
         "database": "connected" if db_ok else "unavailable",
         "reel_count": reel_count,
         "intelligence_count": intelligence_count,

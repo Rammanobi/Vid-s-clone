@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
@@ -20,10 +20,17 @@ async def pipeline_health(
     from app.scheduler import get_pipeline_consecutive_failures
 
     fails = get_pipeline_consecutive_failures()
-    status = "degraded" if fails >= 3 else "healthy" if fails == 0 else "degraded"
+    is_healthy = fails == 0
+    status_str = "healthy" if is_healthy else "degraded"
+
+    if not is_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Pipeline health check failed",
+        )
 
     return {
-        "status": status,
+        "status": status_str,
         "pipeline": {
             "scheduler_running": True,
             "consecutive_failures": fails,

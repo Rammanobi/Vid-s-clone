@@ -112,6 +112,18 @@ async def _invoke_graph(
             agent_confidence_bucket.labels(bucket="low").set(1)
 
         return result
+    except RuntimeError as exc:
+        elapsed = time.monotonic() - start
+        agent_errors_total.labels(mode="sync").inc()
+        agent_invocation_duration_seconds.labels(mode="sync").observe(elapsed)
+        logger.error("graph_db_access_failed", error=str(exc), elapsed_sec=round(elapsed, 3))
+        return {
+            "response": "Service temporarily unavailable. Please try again later.",
+            "citations": [],
+            "confidence_score": 0.0,
+            "intent": None,
+            "evidence": None,
+        }
     except Exception as exc:
         elapsed = time.monotonic() - start
         agent_errors_total.labels(mode="sync").inc()
@@ -239,7 +251,45 @@ async def agent_websocket(
     websocket: WebSocket,
     db: DatabaseClient = Depends(get_db_dependency),
 ):
+    # SECURITY FIX: Require authentication BEFORE accepting connection
+    # This prevents unauthenticated connections from being held open (DoS vector)
+    user: str | None = None
+    try:
+        # Client must send auth token in first message before any other messages
+        initial_data = await asyncio.wait_for(
+            websocket.receive_json(),
+            timeout=5.0,  # 5 second timeout for auth message
+        )
+        token = initial_data.get("token", "")
+
+        if not token:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+
+        # Verify token BEFORE accepting connection
+        from app.auth import verify_token
+
+        try:
+            payload = verify_token(token)
+            user = payload.get("sub")
+            if not isinstance(user, str) or not user:
+                await websocket.close(code=1008, reason="Invalid token")
+                return
+        except Exception as exc:
+            logger.warning("websocket_auth_failed", error=str(exc))
+            await websocket.close(code=1008, reason="Authentication failed")
+            return
+    except asyncio.TimeoutError:
+        await websocket.close(code=1008, reason="Authentication timeout")
+        return
+    except Exception as exc:
+        logger.error("websocket_initial_receive_failed", error=str(exc))
+        await websocket.close(code=1011, reason="Connection error")
+        return
+
+    # NOW accept connection after successful authentication
     await websocket.accept()
+
     if db is None:
         await websocket.send_json({"event": "error", "detail": "Database not available"})
         await websocket.close(code=1011)
@@ -252,15 +302,9 @@ async def agent_websocket(
             data = await websocket.receive_json()
             session_id = data.get("session_id", "")
             message = data.get("message", "")
-            token = data.get("token", "")
 
-            try:
-                from app.auth import verify_token
-                payload = verify_token(token)
-                user = payload.get("sub", "")
-            except Exception:
-                await websocket.send_json({"event": "error", "detail": "Authentication failed"})
-                continue
+            # Authentication already verified at connection time
+            # User identity is already established as 'user'
 
             session = await db.get_session(session_id)
             if not session or session.get("userId") != user:

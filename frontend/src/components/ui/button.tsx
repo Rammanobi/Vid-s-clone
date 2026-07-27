@@ -38,13 +38,19 @@ export interface ButtonProps
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, loading, disabled, children, ...props }, ref) => {
+    // Filter out attributes that might be added by external scripts/extensions
+    const filteredProps = Object.fromEntries(
+      Object.entries(props).filter(([key]) => !key.startsWith('fdprocessedid'))
+    )
+
     return (
       <button
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         disabled={disabled || loading}
         aria-busy={loading}
-        {...props}
+        suppressHydrationWarning
+        {...filteredProps}
       >
         {loading && (
           <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">

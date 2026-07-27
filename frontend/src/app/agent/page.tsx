@@ -232,6 +232,7 @@ export default function AgentPage() {
                       key={s}
                       onClick={() => sendMessage(s)}
                       className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                      suppressHydrationWarning
                     >
                       {s}
                     </button>
@@ -364,6 +365,7 @@ export default function AgentPage() {
                 disabled={loading || !token}
                 className="flex-1 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400/20 dark:border-zinc-800 dark:bg-zinc-950 disabled:opacity-50"
                 aria-label="Chat message"
+                suppressHydrationWarning
               />
               <Button type="submit" size="icon" disabled={loading || !input.trim() || !token}>
                 <Send className="h-4 w-4" aria-hidden="true" />

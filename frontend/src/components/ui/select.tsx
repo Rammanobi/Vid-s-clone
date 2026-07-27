@@ -12,6 +12,12 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ className, label, error, options, id, placeholder, ...props }, ref) => {
     const selectId = id || label?.toLowerCase().replace(/\s+/g, "-")
+
+    // Filter out attributes that might be added by external scripts/extensions
+    const filteredProps = Object.fromEntries(
+      Object.entries(props).filter(([key]) => !key.startsWith('fdprocessedid'))
+    )
+
     return (
       <div className="space-y-2">
         {label && (
@@ -28,7 +34,8 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
           )}
           ref={ref}
           aria-invalid={!!error}
-          {...props}
+          suppressHydrationWarning
+          {...filteredProps}
         >
           {placeholder && <option value="">{placeholder}</option>}
           {options.map((opt) => (

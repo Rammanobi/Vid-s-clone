@@ -138,26 +138,28 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-12rem)] min-h-[420px] flex-col space-y-4">
-      <div className="animate-fade-in">
-        <h1 className="text-3xl font-bold tracking-tight">AI Agent</h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Ask questions about your content strategy
-        </p>
+    <div className="flex h-screen flex-col overflow-hidden bg-white dark:bg-zinc-950">
+      <div className="flex-shrink-0 space-y-3 px-4 py-4">
+        <div className="animate-fade-in">
+          <h1 className="text-3xl font-bold tracking-tight">AI Agent</h1>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Ask questions about your content strategy
+          </p>
+        </div>
+
+        {graphNodes.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 animate-fade-in stagger-1">
+            {graphNodes.map((node) => (
+              <Badge key={node} variant="outline" className="text-[10px]">
+                {node}
+              </Badge>
+            ))}
+          </div>
+        )}
       </div>
 
-      {graphNodes.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 animate-fade-in stagger-1">
-          {graphNodes.map((node) => (
-            <Badge key={node} variant="outline" className="text-[10px]">
-              {node}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <Card className="relative flex flex-1 flex-col overflow-hidden">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <Card className="relative m-4 mt-0 flex flex-1 flex-col overflow-hidden">
+        <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between space-y-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <CardTitle className="flex items-center gap-2 text-base">
             <Bot className="h-5 w-5" aria-hidden="true" />
             Chat
@@ -175,7 +177,7 @@ export default function AgentPage() {
         </CardHeader>
 
         {historyOpen && (
-          <div className="absolute right-4 top-14 z-20 w-80 max-h-96 overflow-y-auto rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="fixed right-8 top-24 z-20 w-80 max-h-96 overflow-y-auto rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-950">
             <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
               <span className="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                 Past conversations
@@ -216,10 +218,10 @@ export default function AgentPage() {
             )}
           </div>
         )}
-        <CardContent className="flex flex-1 flex-col p-0">
+        <CardContent className="flex flex-1 flex-col gap-0 p-0 overflow-hidden">
           <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-4" style={{ WebkitOverflowScrolling: "touch" }}>
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="flex flex-col items-center justify-center min-h-full py-12 text-center">
                 <Bot className="mb-4 h-12 w-12 text-zinc-300 dark:text-zinc-600" />
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">
                   Ask me anything about your content strategy
@@ -329,7 +331,7 @@ export default function AgentPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="flex-shrink-0 border-t border-zinc-200 p-4 dark:border-zinc-800">
             <div className="mb-3 flex items-center gap-2">
               <Select
                 label="Reels to analyze"

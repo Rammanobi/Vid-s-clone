@@ -137,8 +137,13 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 class HTTPSEnforcementMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call: Any) -> Response:
         if settings.environment == "production":
-            forwarded = request.headers.get("X-Forwarded-Proto", "")
-            if forwarded.lower() != "https":
+            forwarded = request.headers.get("X-Forwarded-Proto", "").lower()
+            if not forwarded or forwarded not in ("http", "https"):
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"detail": "Invalid X-Forwarded-Proto header"},
+                )
+            if forwarded != "https":
                 return JSONResponse(
                     status_code=status.HTTP_426_UPGRADE_REQUIRED,
                     content={"detail": "HTTPS required"},

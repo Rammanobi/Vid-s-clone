@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -53,8 +54,8 @@ class LLMClient:
 
         last_error: Exception | None = None
         for attempt in range(self.max_retries):
+            start = time.monotonic()
             try:
-                start = time.monotonic()
                 async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
                     resp = await client.post(url, headers=headers, json=body)
                 elapsed = time.monotonic() - start
@@ -82,8 +83,6 @@ class LLMClient:
                         status=status,
                     )
                     if attempt < self.max_retries - 1:
-                        import asyncio
-
                         await asyncio.sleep(2 ** attempt)
                         continue
 
@@ -97,8 +96,6 @@ class LLMClient:
                 last_error = LLMClientError(f"LLM timeout (attempt {attempt + 1})")
                 logger.warning("llm_timeout", attempt=attempt + 1)
                 if attempt < self.max_retries - 1:
-                    import asyncio
-
                     await asyncio.sleep(2 ** attempt)
                     continue
                 raise last_error

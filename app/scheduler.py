@@ -119,11 +119,11 @@ async def _run_scheduled_pipeline(db: DatabaseClient) -> dict[str, Any]:
 
 async def pipeline_update_loop(db: DatabaseClient) -> None:
     global _pipeline_consecutive_failures
-    interval_sec = settings.creator_update_interval_hours * 3600
+    interval_sec = settings.pipeline_update_interval_hours * 3600
     pipeline_scheduler_running.set(1)
     logger.info(
         "pipeline_update_scheduler_started",
-        interval_hours=settings.creator_update_interval_hours,
+        interval_hours=settings.pipeline_update_interval_hours,
     )
     while True:
         try:

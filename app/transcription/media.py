@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -29,8 +29,24 @@ async def download_video(video_url: str) -> Path:
 
 
 def extract_audio(video_path: Path, audio_path: Path) -> None:
+    ffmpeg_path = shutil.which("ffmpeg")
+
+    if not ffmpeg_path:
+        common_locations = [
+            "C:\\ffmpeg\\bin\\ffmpeg.exe",
+            "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
+            "C:\\Program Files (x86)\\ffmpeg\\bin\\ffmpeg.exe",
+        ]
+        for loc in common_locations:
+            if Path(loc).exists():
+                ffmpeg_path = loc
+                break
+
+    if not ffmpeg_path:
+        raise RuntimeError("ffmpeg not found in PATH or common locations")
+
     cmd = [
-        "ffmpeg",
+        ffmpeg_path,
         "-y",
         "-i", str(video_path),
         "-vn",

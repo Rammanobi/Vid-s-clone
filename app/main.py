@@ -22,6 +22,7 @@ from app.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.monitoring import start_metrics_server
+from app.reel_bot.reel_router import router as reel_bot_router
 from app.routes import agent, analytics, auth, content, creator, health, ingest, knowledge, pipeline, session
 
 logger = get_logger(__name__)
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge.router)
     app.include_router(agent.router)
     app.include_router(pipeline.router)
+    app.include_router(reel_bot_router)
 
     app.dependency_overrides[get_db_dependency] = get_db
 

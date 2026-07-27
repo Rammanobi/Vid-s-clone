@@ -3,15 +3,16 @@
 import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, BarChart3, Film, GitBranch, Bot, Settings, AtSign } from "lucide-react"
+import { LayoutDashboard, BarChart3, Film, GitBranch, Bot, Settings, AtSign, Zap } from "lucide-react"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/connect", label: "Connect", icon: AtSign },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/content", label: "Content Intelligence", icon: Film },
-  { href: "/pipeline", label: "Pipeline", icon: GitBranch },
   { href: "/agent", label: "AI Agent", icon: Bot },
+  { href: "/reel-bot", label: "Reel Bot", icon: Zap },
+  { href: "/pipeline", label: "Pipeline", icon: GitBranch },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 

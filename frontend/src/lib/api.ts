@@ -124,6 +124,13 @@ export const api = {
         token
       ),
   },
+
+  reelBot: {
+    ingest: (payload: { instagram_handle: string }) =>
+      api.post<ReelBotIngestResponse>("/reel-bot/ingest", payload),
+    chat: (payload: { instagram_handle: string; session_id: string | null; message: string }) =>
+      api.post<ReelBotChatResponse>("/reel-bot/chat", payload),
+  },
 }
 
 export interface TopReel {
@@ -192,6 +199,18 @@ export interface PipelineRunResponse {
 export interface PipelineStagesResponse {
   stages: string[]
   description: Record<string, string>
+}
+
+export interface ReelBotIngestResponse {
+  instagram_handle: string
+  reels_synced: number
+  avg_wpm: number | null
+  top_keywords: string[]
+}
+
+export interface ReelBotChatResponse {
+  session_id: string
+  response: string
 }
 
 export interface SessionsResponse {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -54,6 +55,68 @@ async def _get_hiker() -> ReelBotHikerClient:
     return _hiker
 
 
+async def _process_single_reel(media: dict[str, Any]) -> dict[str, Any] | None:
+    """Process a single reel: extract data, transcribe, clean. Returns reel_data dict or None."""
+    try:
+        instagram_reel_id = str(media.get("pk", ""))
+        video_url = ""
+
+        video_versions = media.get("video_versions") or []
+        if video_versions:
+            best = max(video_versions, key=lambda v: v.get("bandwidth") or 0)
+            video_url = best.get("url", "")
+
+        caption_obj = media.get("caption")
+        caption = caption_obj.get("text") if isinstance(caption_obj, dict) else None
+
+        duration_sec = media.get("video_duration", 0.0)
+        posted_at_timestamp = media.get("taken_at")
+        posted_at = None
+        if posted_at_timestamp:
+            posted_at = datetime.fromtimestamp(posted_at_timestamp).isoformat()
+
+        views = int(media.get("play_count", 0))
+        likes = int(media.get("like_count", 0))
+        comments_count = int(media.get("comment_count", 0))
+        shares = int(media.get("reshare_count", 0))
+
+        raw_transcript = None
+        clean_transcript = None
+        word_count = None
+        wpm = None
+        top_keywords = []
+
+        if video_url:
+            transcript_result = await transcribe_reel(video_url, instagram_reel_id)
+            if transcript_result:
+                raw_transcript = transcript_result.get("transcript")
+                if raw_transcript and duration_sec > 0:
+                    analysis = clean_and_analyze(raw_transcript, duration_sec)
+                    clean_transcript = analysis["clean_transcript"]
+                    word_count = analysis["word_count"]
+                    wpm = analysis["wpm"]
+                    top_keywords = analysis["top_keywords"]
+
+        return {
+            "instagram_reel_id": instagram_reel_id,
+            "video_url": video_url,
+            "caption": caption,
+            "views": views,
+            "likes": likes,
+            "comments_count": comments_count,
+            "shares": shares,
+            "duration_sec": duration_sec,
+            "posted_at": posted_at,
+            "raw_transcript": raw_transcript,
+            "clean_transcript": clean_transcript,
+            "word_count": word_count,
+            "wpm": wpm,
+            "top_keywords": top_keywords,
+        }
+    except Exception:
+        return None
+
+
 @router.post("/ingest", response_model=ReelIngestResponse)
 async def ingest_reels(
     payload: ReelIngestPayload,
@@ -81,84 +144,11 @@ async def ingest_reels(
             user_id, max_items=settings.max_reels
         )
 
-        stored_reels = []
-        wpm_values = []
+        tasks = [_process_single_reel(media) for media in media_items]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
 
-        for media in media_items:
-            try:
-                instagram_reel_id = str(media.get("pk", ""))
-                video_url = ""
-
-                video_versions = media.get("video_versions") or []
-                if video_versions:
-                    best = max(
-                        video_versions, key=lambda v: v.get("bandwidth") or 0
-                    )
-                    video_url = best.get("url", "")
-
-                caption_obj = media.get("caption")
-                caption = (
-                    caption_obj.get("text")
-                    if isinstance(caption_obj, dict)
-                    else None
-                )
-
-                duration_sec = media.get("video_duration", 0.0)
-                posted_at_timestamp = media.get("taken_at")
-                posted_at = None
-                if posted_at_timestamp:
-                    posted_at = datetime.fromtimestamp(
-                        posted_at_timestamp
-                    ).isoformat()
-
-                views = int(media.get("play_count", 0))
-                likes = int(media.get("like_count", 0))
-                comments_count = int(media.get("comment_count", 0))
-                shares = int(media.get("reshare_count", 0))
-
-                raw_transcript = None
-                clean_transcript = None
-                word_count = None
-                wpm = None
-                top_keywords = []
-
-                if video_url:
-                    transcript_result = await transcribe_reel(
-                        video_url, instagram_reel_id
-                    )
-                    if transcript_result:
-                        raw_transcript = transcript_result.get("transcript")
-                        if raw_transcript and duration_sec > 0:
-                            analysis = clean_and_analyze(
-                                raw_transcript, duration_sec
-                            )
-                            clean_transcript = analysis["clean_transcript"]
-                            word_count = analysis["word_count"]
-                            wpm = analysis["wpm"]
-                            top_keywords = analysis["top_keywords"]
-
-                            wpm_values.append(wpm)
-
-                reel_data = {
-                    "instagram_reel_id": instagram_reel_id,
-                    "video_url": video_url,
-                    "caption": caption,
-                    "views": views,
-                    "likes": likes,
-                    "comments_count": comments_count,
-                    "shares": shares,
-                    "duration_sec": duration_sec,
-                    "posted_at": posted_at,
-                    "raw_transcript": raw_transcript,
-                    "clean_transcript": clean_transcript,
-                    "word_count": word_count,
-                    "wpm": wpm,
-                    "top_keywords": top_keywords,
-                }
-                stored_reels.append(reel_data)
-
-            except Exception as e:
-                continue
+        stored_reels = [r for r in results if r is not None]
+        wpm_values = [r["wpm"] for r in stored_reels if r.get("wpm")]
 
         if not stored_reels:
             raise HTTPException(

@@ -35,6 +35,11 @@ class Settings:
     groq_api_key: str = field(
         default_factory=lambda: os.environ.get("GROQ_API_KEY", "")
     )
+    groq_base_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "GROQ_BASE_URL", "https://api.groq.com/openai/v1"
+        )
+    )
     database_url: str = field(
         default_factory=lambda: os.environ.get("DATABASE_URL", "")
     )

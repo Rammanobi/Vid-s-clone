@@ -5,13 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Send, Loader2, Plus, X } from "lucide-react"
+import { Send, Loader2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api, type ReelBotIngestResponse } from "@/lib/api"
 import { PromptChips } from "./components/PromptChips"
 import { MessageBubble } from "./components/MessageBubble"
 
 type Phase = "ingestion" | "chat"
+type IngestPhase = "idle" | "fetching" | "downloading" | "transcribing" | "processing"
 
 interface Message {
   role: "user" | "assistant"
@@ -28,27 +29,54 @@ const DEFAULT_SUGGESTIONS = [
   "How has my performance changed recently?",
 ]
 
+const INGEST_MESSAGES: Record<IngestPhase, string> = {
+  idle: "Ready to connect...",
+  fetching: "🔍 Fetching your Instagram profile...",
+  downloading: "📥 Downloading your latest reels...",
+  transcribing: "🎙️ Transcribing audio with AI...",
+  processing: "⚙️ Analyzing and processing data...",
+}
+
 export default function ReelBotPage() {
   const [phase, setPhase] = useState<Phase>("ingestion")
   const [handle, setHandle] = useState("")
   const [handleInput, setHandleInput] = useState("")
   const [ingestLoading, setIngestLoading] = useState(false)
+  const [ingestPhase, setIngestPhase] = useState<IngestPhase>("idle")
   const [ingestError, setIngestError] = useState<string | null>(null)
   const [ingestResult, setIngestResult] = useState<IngestResult | null>(null)
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
+  const [chatPhase, setChatPhase] = useState("")
   const [sessionId, setSessionId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [messages, chatLoading])
+
+  useEffect(() => {
+    if (!ingestLoading) return
+
+    const phases: IngestPhase[] = ["fetching", "downloading", "transcribing", "processing"]
+    let currentPhaseIndex = 0
+
+    const interval = setInterval(() => {
+      if (currentPhaseIndex < phases.length) {
+        setIngestPhase(phases[currentPhaseIndex])
+        currentPhaseIndex++
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [ingestLoading])
 
   const handleIngest = async (e: React.FormEvent) => {
     e.preventDefault()
     setIngestError(null)
+    setIngestPhase("fetching")
 
     const cleanHandle = handleInput.toLowerCase().replace(/^@/, "").trim()
     if (!cleanHandle) {
@@ -61,11 +89,13 @@ export default function ReelBotPage() {
       const result = await api.reelBot.ingest({ instagram_handle: cleanHandle })
       setIngestResult(result)
       setHandle(result.instagram_handle)
+      setIngestPhase("idle")
       setPhase("chat")
       setSessionId(null)
       setMessages([])
     } catch (err) {
       setIngestError(err instanceof Error ? err.message : "Connection error")
+      setIngestPhase("idle")
     } finally {
       setIngestLoading(false)
     }
@@ -165,6 +195,24 @@ export default function ReelBotPage() {
                   We analyze the last 20 public reels from your account
                 </p>
               </div>
+
+              {ingestLoading && (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" />
+                      <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
+                      <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
+                    </div>
+                    <span className="text-amber-400 font-medium text-sm">
+                      {INGEST_MESSAGES[ingestPhase]}
+                    </span>
+                  </div>
+                  <div className="h-1 bg-secondary/30 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500/60 rounded-full w-3/4 animate-pulse" />
+                  </div>
+                </div>
+              )}
 
               {ingestError && (
                 <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
@@ -281,11 +329,17 @@ export default function ReelBotPage() {
 
           {chatLoading && (
             <div className="flex justify-start">
-              <div className="bg-secondary/50 border border-border/30 rounded-lg px-4 py-3 max-w-xs">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce" />
-                  <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce delay-100" />
-                  <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce delay-200" />
+              <div className="bg-gradient-to-r from-secondary/70 to-secondary/50 border border-border/40 rounded-2xl px-5 py-4 max-w-sm shadow-sm">
+                <div className="space-y-2">
+                  <div className="flex gap-2 items-center">
+                    <div className="flex gap-1">
+                      <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-bounce" />
+                      <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
+                      <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
+                    </div>
+                    <span className="text-amber-400 font-medium text-sm">Analyzing your reels...</span>
+                  </div>
+                  <p className="text-foreground/60 text-xs pl-9">This may take a moment as we review your content</p>
                 </div>
               </div>
             </div>
@@ -296,23 +350,29 @@ export default function ReelBotPage() {
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-border/30 bg-secondary/5 px-4 py-4">
+      <div className="border-t border-border/30 bg-gradient-to-t from-secondary/10 to-transparent px-4 py-6">
         <div className="max-w-4xl mx-auto">
-          <form onSubmit={handleSendMessage} className="flex gap-2">
+          <form onSubmit={handleSendMessage} className="flex gap-3">
             <Input
               type="text"
-              placeholder="Ask about your content..."
+              placeholder="Ask about your reels, content strategy, or performance..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={chatLoading}
-              className="flex-1 bg-secondary/50 border-border/30 text-foreground placeholder:text-foreground/40"
+              className="flex-1 bg-secondary/60 border border-border/40 text-foreground placeholder:text-foreground/50 rounded-2xl px-5 py-3 text-base focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500/50"
             />
             <Button
               type="submit"
               disabled={chatLoading || !input.trim()}
-              className="bg-amber-600/80 hover:bg-amber-600 text-white px-4"
+              className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white px-6 py-3 rounded-2xl font-medium transition-all shadow-lg hover:shadow-xl disabled:opacity-50"
             >
-              <Send className="w-4 h-4" />
+              {chatLoading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  <Send className="w-5 h-5" />
+                </>
+              )}
             </Button>
           </form>
         </div>

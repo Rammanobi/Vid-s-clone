@@ -120,56 +120,63 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     start_metrics_server()
     logger.info("app_started", environment=settings.environment)
-    try:
-        from app.analytics import snapshot_all_metrics
 
-        snap_result = await snapshot_all_metrics(db_client, limit=50)
-        logger.info(
-            "startup_snapshot_complete",
-            snapshots=snap_result["snapshots_created"],
-        )
-    except Exception as exc:
-        logger.warning("startup_snapshot_skipped", error=str(exc))
-    try:
-        from app.creator_pipeline import run_creator_intelligence_pipeline
+    run_startup_jobs = os.environ.get("RUN_STARTUP_JOBS", "false").lower() == "true"
 
-        creator_result = await run_creator_intelligence_pipeline(db_client, limit=100)
-        logger.info(
-            "startup_creator_intelligence_complete",
-            reels_analyzed=creator_result.get("reels_analyzed", 0),
-        )
-    except Exception as exc:
-        logger.warning("startup_creator_intelligence_skipped", error=str(exc))
+    if run_startup_jobs:
+        try:
+            from app.analytics import snapshot_all_metrics
+
+            snap_result = await snapshot_all_metrics(db_client, limit=50)
+            logger.info(
+                "startup_snapshot_complete",
+                snapshots=snap_result["snapshots_created"],
+            )
+        except Exception as exc:
+            logger.warning("startup_snapshot_skipped", error=str(exc))
+        try:
+            from app.creator_pipeline import run_creator_intelligence_pipeline
+
+            creator_result = await run_creator_intelligence_pipeline(db_client, limit=100)
+            logger.info(
+                "startup_creator_intelligence_complete",
+                reels_analyzed=creator_result.get("reels_analyzed", 0),
+            )
+        except Exception as exc:
+            logger.warning("startup_creator_intelligence_skipped", error=str(exc))
+        try:
+            from app.pipeline import PipelineStage, run_pipeline
+
+            logger.info("startup_pipeline_started")
+            startup_result = await run_pipeline(
+                db_client,
+                stages=[
+                    PipelineStage.ENRICHMENT,
+                    PipelineStage.ANALYTICS,
+                    PipelineStage.INTELLIGENCE,
+                    PipelineStage.KNOWLEDGE,
+                    PipelineStage.AGENT,
+                    PipelineStage.RETRIEVAL,
+                ],
+                enrichment_limit=10,
+                analytics_limit=50,
+                intelligence_limit=50,
+                intelligence_use_llm=False,
+                knowledge_limit=100,
+            )
+            logger.info(
+                "startup_pipeline_complete",
+                status=startup_result.status,
+                elapsed_sec=startup_result.elapsed_sec,
+                stages=[s.stage.value for s in startup_result.stages],
+            )
+        except Exception as exc:
+            logger.warning("startup_pipeline_skipped", error=str(exc))
+    else:
+        logger.info("startup_pipelines_disabled", reason="RUN_STARTUP_JOBS not set to true")
+
     creator_task: asyncio.Task[Any] | None = None
     pipeline_task: asyncio.Task[Any] | None = None
-    try:
-        from app.pipeline import PipelineStage, run_pipeline
-
-        logger.info("startup_pipeline_started")
-        startup_result = await run_pipeline(
-            db_client,
-            stages=[
-                PipelineStage.ENRICHMENT,
-                PipelineStage.ANALYTICS,
-                PipelineStage.INTELLIGENCE,
-                PipelineStage.KNOWLEDGE,
-                PipelineStage.AGENT,
-                PipelineStage.RETRIEVAL,
-            ],
-            enrichment_limit=10,
-            analytics_limit=50,
-            intelligence_limit=50,
-            intelligence_use_llm=False,
-            knowledge_limit=100,
-        )
-        logger.info(
-            "startup_pipeline_complete",
-            status=startup_result.status,
-            elapsed_sec=startup_result.elapsed_sec,
-            stages=[s.stage.value for s in startup_result.stages],
-        )
-    except Exception as exc:
-        logger.warning("startup_pipeline_skipped", error=str(exc))
     if settings.schedulers_enabled:
         try:
             from app.scheduler import creator_update_loop, pipeline_update_loop

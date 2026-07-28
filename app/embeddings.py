@@ -6,6 +6,9 @@ from app.logging_setup import get_logger
 
 logger = get_logger(__name__)
 
+_embedding_model: Any = None
+_embedding_model_loaded = False
+
 
 def _try_load_embedding_model() -> Any:
     try:
@@ -19,16 +22,22 @@ def _try_load_embedding_model() -> Any:
         return None
 
 
-_embedding_model = _try_load_embedding_model()
-
-
 def embedding_model_available() -> bool:
+    global _embedding_model, _embedding_model_loaded
+    if not _embedding_model_loaded:
+        _embedding_model = _try_load_embedding_model()
+        _embedding_model_loaded = True
     return _embedding_model is not None
 
 
 def embed_text(text: str) -> list[float] | None:
+    global _embedding_model, _embedding_model_loaded
     if not text or not text.strip():
         return None
+
+    if not _embedding_model_loaded:
+        _embedding_model = _try_load_embedding_model()
+        _embedding_model_loaded = True
 
     if _embedding_model is None:
         logger.error("sentence_transformer_not_loaded, cannot embed text")

@@ -10,6 +10,9 @@ logger = get_logger(__name__)
 
 _SPEECH_MIN_SCORE = 0.1
 
+_whisper_model: Any = None
+_whisper_model_loaded = False
+
 
 def _try_load_whisper() -> Any:
     try:
@@ -23,14 +26,20 @@ def _try_load_whisper() -> Any:
         return None
 
 
-_whisper_model = _try_load_whisper()
-
-
 def whisper_available() -> bool:
+    global _whisper_model, _whisper_model_loaded
+    if not _whisper_model_loaded:
+        _whisper_model = _try_load_whisper()
+        _whisper_model_loaded = True
     return _whisper_model is not None
 
 
 def transcribe(audio_path: str) -> TranscriptResult | None:
+    global _whisper_model, _whisper_model_loaded
+    if not _whisper_model_loaded:
+        _whisper_model = _try_load_whisper()
+        _whisper_model_loaded = True
+
     if _whisper_model is None:
         logger.error("faster-whisper not loaded, cannot transcribe")
         return None

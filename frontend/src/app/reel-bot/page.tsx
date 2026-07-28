@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Send, Loader2, Plus } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { api, type ReelBotIngestResponse } from "@/lib/api"
 import { PromptChips } from "./components/PromptChips"
 import { MessageBubble } from "./components/MessageBubble"
@@ -49,7 +48,6 @@ export default function ReelBotPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
-  const [chatPhase, setChatPhase] = useState("")
   const [sessionId, setSessionId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -275,8 +273,8 @@ export default function ReelBotPage() {
   return (
     <div className="w-full h-screen flex flex-col bg-background">
       {/* Header */}
-      <div className="border-b border-border/30 bg-secondary/5 px-4 py-3">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+      <div className="border-b border-border/30 bg-secondary/5 px-4 py-3 flex-shrink-0">
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-foreground">Reel Bot</h1>
             <p className="text-xs text-foreground/50">
@@ -296,13 +294,13 @@ export default function ReelBotPage() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="max-w-4xl mx-auto space-y-4">
+      <div className="flex-1 overflow-y-auto w-full">
+        <div className="w-full max-w-2xl mx-auto px-4 py-4 space-y-4">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center">
               <div className="space-y-4">
                 <div>
-                  <h2 className="text-xl font-semibold text-foreground mb-2">
+                  <h2 className="text-2xl font-bold text-foreground mb-2">
                     Ask about your reels
                   </h2>
                   <p className="text-foreground/60 text-sm">
@@ -349,33 +347,43 @@ export default function ReelBotPage() {
         </div>
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-border/30 bg-gradient-to-t from-secondary/10 to-transparent px-4 py-6">
-        <div className="max-w-4xl mx-auto">
-          <form onSubmit={handleSendMessage} className="flex gap-3">
-            <Input
-              type="text"
+      {/* Input Area - Fixed at Bottom */}
+      <div className="w-full bg-gradient-to-t from-secondary/20 via-secondary/10 to-transparent px-4 py-6 flex-shrink-0">
+        <form onSubmit={handleSendMessage} className="w-full max-w-2xl mx-auto">
+          <div className="relative flex items-end gap-3 bg-secondary/60 border border-border/40 rounded-3xl px-4 py-3 transition-all hover:border-border/60 focus-within:border-amber-500/50 focus-within:ring-2 focus-within:ring-amber-500/20">
+            {/* Textarea for growing input */}
+            <textarea
               placeholder="Ask about your reels, content strategy, or performance..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={chatLoading}
-              className="flex-1 bg-secondary/60 border border-border/40 text-foreground placeholder:text-foreground/50 rounded-2xl px-5 py-3 text-base focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500/50"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSendMessage(input)
+                }
+              }}
+              className="flex-1 bg-transparent text-foreground placeholder:text-foreground/50 text-base resize-none outline-none min-h-12 max-h-24 py-1"
+              rows={1}
             />
+
+            {/* Send Button */}
             <Button
               type="submit"
               disabled={chatLoading || !input.trim()}
-              className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white px-6 py-3 rounded-2xl font-medium transition-all shadow-lg hover:shadow-xl disabled:opacity-50"
+              className="flex-shrink-0 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white rounded-full p-3 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 h-10 w-10 flex items-center justify-center"
             >
               {chatLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
-                <>
-                  <Send className="w-5 h-5" />
-                </>
+                <Send className="w-5 h-5" />
               )}
             </Button>
-          </form>
-        </div>
+          </div>
+          <p className="text-xs text-foreground/40 mt-2 text-center">
+            Press Enter to send, Shift+Enter for new line
+          </p>
+        </form>
       </div>
     </div>
   )

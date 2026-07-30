@@ -234,8 +234,10 @@ export function RichTextResponse({ content }: RichTextResponseProps) {
     const parts: React.ReactNode[] = []
     let lastIndex = 0
 
-    // Pattern for **bold**, *italic*, and `code`
-    const pattern = /\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(\d+(?:,\d+)*%?|\d+(?:,\d+)* (?:views?|likes?|comments?|shares?|reels?|reel))/gi
+    // Pattern for [link](url), **bold**, *italic*, `code`, and bare numbers.
+    // Link goes first: an LLM-provided [desc](url) must win over any other
+    // rule that might otherwise match inside its bracket/paren text.
+    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(\d+(?:,\d+)*%?|\d+(?:,\d+)* (?:views?|likes?|comments?|shares?|reels?|reel))/gi
 
     let match
     const regex = new RegExp(pattern)
@@ -246,32 +248,50 @@ export function RichTextResponse({ content }: RichTextResponseProps) {
         parts.push(text.slice(lastIndex, match.index))
       }
 
-      if (match[1]) {
-        // Bold
+      if (match[1] && match[2]) {
+        // Markdown link -> a real, clickable anchor to the reel's actual
+        // Instagram permalink, opened in a new tab.
         parts.push(
-          <strong key={`bold-${match.index}`} className="font-bold text-amber-300">
+          <a
+            key={`link-${match.index}`}
+            href={match[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-amber-300 underline decoration-amber-500/50 hover:text-amber-200 hover:decoration-amber-400"
+          >
             {match[1]}
-          </strong>
-        )
-      } else if (match[2]) {
-        // Italic
-        parts.push(
-          <em key={`italic-${match.index}`} className="italic text-foreground/80">
-            {match[2]}
-          </em>
+          </a>
         )
       } else if (match[3]) {
+        // Bold - re-parsed recursively: the LLM sometimes writes
+        // **[link](url)** (bolding its own link). Since "**" starts before
+        // "[" in the string, this pattern matches bold first and swallows
+        // the whole link as plain text unless the bold content is itself
+        // re-run through the same parser.
+        parts.push(
+          <strong key={`bold-${match.index}`} className="font-bold text-amber-300">
+            {formatInlineSegment(match[3])}
+          </strong>
+        )
+      } else if (match[4]) {
+        // Italic - same recursive re-parse, for the same reason.
+        parts.push(
+          <em key={`italic-${match.index}`} className="italic text-foreground/80">
+            {formatInlineSegment(match[4])}
+          </em>
+        )
+      } else if (match[5]) {
         // Inline code
         parts.push(
           <code key={`code-${match.index}`} className="bg-black/30 px-2 py-1 rounded text-amber-100 text-xs font-mono">
-            {match[3]}
+            {match[5]}
           </code>
         )
-      } else if (match[4]) {
+      } else if (match[6]) {
         // Numbers/stats
         parts.push(
           <span key={`stat-${match.index}`} className="font-semibold text-amber-300 bg-amber-600/10 px-2 py-1 rounded">
-            {match[4]}
+            {match[6]}
           </span>
         )
       }

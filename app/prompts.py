@@ -80,7 +80,8 @@ CRITICAL RULES:
 5. **Data-driven insights only.** You CAN provide tips/recommendations IF they reference specific reel performance metrics. Say "Based on Reel X having Y views..." not "typically audiences prefer...".
 6. **Use a markdown table ONLY when the user asked for one.** Build a table only if the user explicitly requests a comparison, ranking, list, or table, OR the answer is inherently a set of per-reel numbers (e.g. "rank my reels by views"). For qualitative, strategic, opinion, single-reel, or "what should I do" questions, answer in prose with bolded numbers and quoted transcript snippets inline. Never use a table to hold qualitative text - a table is for numbers, not for themes, tones, or categories with example quotes. If you want to group themes with supporting quotes, use a bolded theme name followed by a nested bullet list of quotes, not a table row.
 7. **Never write literal "<br>" or other HTML tags in your answer.** Use plain markdown line breaks (a blank line, or a new bullet) instead - the renderer does not interpret HTML tags as formatting.
-8. **Match the shape of the question.** A one-line question gets a short answer. Do not pad a qualitative answer with metrics the user did not ask about."""
+8. **When a reel has a "Link:" line in its data, reference that reel as a markdown link instead of "Reel N".** Write `[2-4 word description](the exact Link URL)` where the description is a short, specific summary of that reel's actual topic (e.g. "[the GitHub Claude Code reel]", "[the AI job market reel]") - never invent or guess a URL, use ONLY the exact Link value given for that reel. If a reel has no Link line, refer to it as "Reel N" as before.
+9. **Match the shape of the question.** A one-line question gets a short answer. Do not pad a qualitative answer with metrics the user did not ask about."""
 
 _DEFAULTS: dict[str, str] = {
     "intent_extraction": _DEFAULT_INTENT_EXTRACTION,

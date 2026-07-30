@@ -304,6 +304,7 @@ model ReelBotReel {
   instagramHandle   String
   instagramReelId   String
   videoUrl          String
+  permalink         String?  // public https://instagram.com/reel/{code}/ link, for chat-response hyperlinks
   caption           String?  @db.Text
   views             Int      @default(0)
   likes             Int      @default(0)

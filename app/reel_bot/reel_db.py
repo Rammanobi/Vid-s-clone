@@ -53,27 +53,29 @@ class ReelBotDatabaseClient:
                 await conn.execute(
                     """
                     INSERT INTO "ReelBotReel" (
-                        "id", "instagramHandle", "instagramReelId", "videoUrl", "caption",
+                        "id", "instagramHandle", "instagramReelId", "videoUrl", "permalink", "caption",
                         "views", "likes", "commentsCount", "shares", "durationSec",
                         "postedAt", "rawTranscript", "cleanTranscript", "wordCount",
                         "wpm", "topKeywords", "createdAt", "updatedAt"
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                     ON CONFLICT ("instagramHandle", "instagramReelId") DO UPDATE SET
-                        "views" = $6,
-                        "likes" = $7,
-                        "commentsCount" = $8,
-                        "shares" = $9,
-                        "rawTranscript" = $12,
-                        "cleanTranscript" = $13,
-                        "wordCount" = $14,
-                        "wpm" = $15,
-                        "topKeywords" = $16,
-                        "updatedAt" = $18
+                        "views" = $7,
+                        "likes" = $8,
+                        "commentsCount" = $9,
+                        "shares" = $10,
+                        "permalink" = $5,
+                        "rawTranscript" = $13,
+                        "cleanTranscript" = $14,
+                        "wordCount" = $15,
+                        "wpm" = $16,
+                        "topKeywords" = $17,
+                        "updatedAt" = $19
                     """,
                     reel_id,
                     handle,
                     reel["instagram_reel_id"],
                     reel["video_url"],
+                    reel.get("permalink"),
                     reel.get("caption"),
                     reel.get("views", 0),
                     reel.get("likes", 0),
@@ -112,7 +114,7 @@ class ReelBotDatabaseClient:
             rows = await conn.fetch(
                 """
                 SELECT
-                    "instagramReelId", "videoUrl", "caption", "views", "likes",
+                    "instagramReelId", "videoUrl", "permalink", "caption", "views", "likes",
                     "commentsCount", "shares", "durationSec", "postedAt",
                     "rawTranscript", "cleanTranscript", "wordCount", "wpm", "topKeywords"
                 FROM "ReelBotReel"

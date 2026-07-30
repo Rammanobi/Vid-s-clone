@@ -62,6 +62,8 @@ async def _process_single_reel(media: dict[str, Any]) -> dict[str, Any] | None:
     """Process a single reel: extract data, transcribe, clean. Returns reel_data dict or None."""
     try:
         instagram_reel_id = str(media.get("pk", ""))
+        shortcode = media.get("code", "")
+        permalink = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else ""
         video_url = ""
 
         video_versions = media.get("video_versions") or []
@@ -103,6 +105,7 @@ async def _process_single_reel(media: dict[str, Any]) -> dict[str, Any] | None:
         return {
             "instagram_reel_id": instagram_reel_id,
             "video_url": video_url,
+            "permalink": permalink,
             "caption": caption,
             "views": views,
             "likes": likes,

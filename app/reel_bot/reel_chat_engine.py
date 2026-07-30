@@ -18,6 +18,8 @@ def _format_reel_block(reels: list[dict[str, Any]]) -> str:
 
     for i, reel in enumerate(reels, 1):
         lines.append(f"[REEL {i}]")
+        if reel.get("permalink"):
+            lines.append(f"  Link: {reel['permalink']}")
         # " · " not " | ": pipe-delimited metrics primed the LLM toward
         # markdown-table output even on qualitative questions - it saw
         # table-shaped data in context and defaulted to a table-shaped reply.

@@ -215,6 +215,22 @@ export function RichTextResponse({ content }: RichTextResponseProps) {
   }
 
   const renderInlineFormatting = (text: string) => {
+    // The LLM sometimes emits literal "<br>" inside table cells to force a
+    // line break within one cell - without this split, it rendered as the
+    // raw string "<br>" instead of an actual line break.
+    const brSegments = text.split(/<br\s*\/?>/i)
+    if (brSegments.length > 1) {
+      const withBreaks: React.ReactNode[] = []
+      brSegments.forEach((segment, idx) => {
+        if (idx > 0) withBreaks.push(<br key={`br-${idx}`} />)
+        withBreaks.push(...formatInlineSegment(segment))
+      })
+      return withBreaks
+    }
+    return formatInlineSegment(text)
+  }
+
+  const formatInlineSegment = (text: string) => {
     const parts: React.ReactNode[] = []
     let lastIndex = 0
 
@@ -268,7 +284,10 @@ export function RichTextResponse({ content }: RichTextResponseProps) {
       parts.push(text.slice(lastIndex))
     }
 
-    return parts.length > 0 ? parts : text
+    // Always an array, never a bare string: renderInlineFormatting spreads
+    // this result with "...formatInlineSegment(segment)" when handling
+    // "<br>" splits - spreading a string would explode it into characters.
+    return parts.length > 0 ? parts : [text]
   }
 
   return (

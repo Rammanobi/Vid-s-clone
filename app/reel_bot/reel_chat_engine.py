@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.prompts import get_reel_bot_chat_prompt
 from app.reel_bot.config import settings
 from app.reel_bot.reel_db import ReelBotDatabaseClient
 from app.reel_bot.reel_llm_client import ReelBotLLMClient
@@ -17,8 +18,11 @@ def _format_reel_block(reels: list[dict[str, Any]]) -> str:
 
     for i, reel in enumerate(reels, 1):
         lines.append(f"[REEL {i}]")
-        lines.append(f"  Metrics: {reel['views']:,} views | {reel['likes']:,} likes | "
-                     f"{reel['commentsCount']:,} comments | {reel['shares']:,} shares")
+        # " · " not " | ": pipe-delimited metrics primed the LLM toward
+        # markdown-table output even on qualitative questions - it saw
+        # table-shaped data in context and defaulted to a table-shaped reply.
+        lines.append(f"  Metrics: {reel['views']:,} views · {reel['likes']:,} likes · "
+                     f"{reel['commentsCount']:,} comments · {reel['shares']:,} shares")
 
         if reel.get("durationSec"):
             lines.append(f"  Duration: {reel['durationSec']:.1f}s")
@@ -49,21 +53,13 @@ def _build_prompt(
     user_message: str,
 ) -> list[dict[str, str]]:
     """Build the messages list for the LLM."""
-    system_prompt = """You are an AI assistant analyzing Instagram Reels performance ONLY using provided data.
-
-CRITICAL RULES:
-1. **ONLY reference data from the REEL DATA section below.** Do NOT use general knowledge or generic advice.
-2. **Quote transcripts directly** when discussing content. Use exact words from the cleaned transcript.
-3. **Be specific with numbers.** Reference exact views, likes, comments, shares, WPM from the data.
-4. **If a reel has no transcript, explicitly state:** "Transcript not available for Reel X."
-5. **Data-driven insights only.** You CAN provide tips/recommendations IF they reference specific reel performance metrics. Say "Based on Reel X having Y views..." not "typically audiences prefer...".
-6. **Compare reels quantitatively.** Identify patterns by analyzing metrics—which reels got most views/engagement and what they have in common.
-
-REEL DATA (LAST 20):
-
-""" + _format_reel_block(reels) + """
-
-Follow these rules strictly. Your job is to be a data analyst grounded in the metrics above."""
+    system_prompt = (
+        get_reel_bot_chat_prompt()
+        + "\n\nREEL DATA (LAST 20):\n\n"
+        + _format_reel_block(reels)
+        + "\n\nFollow these rules strictly. Your job is to be a data analyst grounded in the "
+          "metrics above. Match your output format to what the user asked for."
+    )
 
     messages = [{"role": "system", "content": system_prompt}]
 

@@ -7,5 +7,8 @@ __pycache__
 .pytest_cache
 *.egg-info
 node_modules
-prisma
-hiker_ingestion
+frontend
+data
+# NOTE: prisma/ and hiker_ingestion/ are NOT excluded - the Dockerfile
+# explicitly COPYs both into the image (schema docs + the ingestion
+# package); excluding them here broke every container build until now.

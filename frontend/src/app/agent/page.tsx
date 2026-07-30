@@ -138,7 +138,7 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-white dark:bg-zinc-950">
+    <div className="flex h-[calc(100dvh-8rem)] min-h-[420px] flex-col overflow-hidden bg-white dark:bg-zinc-950">
       <div className="flex-shrink-0 space-y-3 px-4 py-4">
         <div className="animate-fade-in">
           <h1 className="text-3xl font-bold tracking-tight">AI Agent</h1>
@@ -296,7 +296,13 @@ export default function AgentPage() {
                       {msg.transcriptionStatus.map((t, ti) => (
                         <p key={ti} className="text-[11px] text-zinc-400">
                           {t.error
-                            ? `Failed: ${t.error}`
+                            ? `Failed to transcribe: ${
+                                t.error.includes("403") || t.error.includes("Forbidden")
+                                  ? "the stored video link has expired - reconnect the account to refresh it"
+                                  : t.error.length > 100
+                                    ? t.error.slice(0, 100) + "…"
+                                    : t.error
+                              }`
                             : t.skipped
                               ? "Reel already had a transcript, reused it"
                               : t.transcript

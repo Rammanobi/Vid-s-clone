@@ -31,8 +31,14 @@ async def health(
     except Exception:
         redis_ok = False
 
-    is_healthy = db_ok and redis_ok
-    status_code = "healthy" if is_healthy else "degraded"
+    # Only the database is required to call this service healthy. Redis is a
+    # cache: every read falls back to the DB when it's absent, so a missing
+    # Redis degrades speed, not correctness. Gating 503 on redis_ok too meant
+    # production - which has no Redis instance provisioned - reported itself
+    # permanently down, and the dashboard's own status tiles read this
+    # endpoint, so a working deployment showed every service "Unreachable".
+    is_healthy = db_ok
+    status_code = "healthy" if (db_ok and redis_ok) else "degraded"
     http_requests_total.labels(
         method="GET", endpoint="/health", status=status_code
     ).inc()
@@ -40,7 +46,7 @@ async def health(
     if not is_healthy:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="One or more health checks failed",
+            detail="Database health check failed",
         )
 
     return {

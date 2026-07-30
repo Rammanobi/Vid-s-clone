@@ -1,4 +1,8 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+// `??`, not `||`: an intentionally-empty string means "same origin, no
+// prefix" (Firebase Hosting rewrites the backend's own route paths straight
+// through to Cloud Run) - `||` would treat "" as unset and wrongly fall back
+// to localhost in that deployment.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 interface RequestOptions extends RequestInit {
   token?: string

@@ -22,9 +22,16 @@ RUN groupadd -r app && useradd -r -g app app
 
 WORKDIR /app
 
-# Install runtime deps: curl for health checks, ca-certificates for SSL
+# Install runtime deps: curl for health checks, ca-certificates for SSL,
+# ffmpeg for audio extraction (both the main Whisper pipeline and Reel Bot's
+# media processing shell out to it), libglib2.0-0 (opencv-python-headless
+# dynamically links against it even without GUI support - ImportError on
+# `import cv2` without it), libgomp1 (faster-whisper's ctranslate2 backend
+# needs it for OpenMP threading - "libgomp.so.1: cannot open shared object
+# file" without it). None of these surfaced locally because the dev machine
+# already had them; only a clean container build exposes the gap.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates && \
+    curl ca-certificates ffmpeg libglib2.0-0 libgomp1 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

@@ -948,8 +948,12 @@ class DatabaseClient:
         if not query.strip():
             return []
 
+        # param_offset=4, not 3: $1=query, $2=limit, $3=matched_terms(::text[])
+        # are already reserved by this query below - starting filters at $3
+        # collided with matched_terms and produced "operator does not exist:
+        # text ~~* text[]" whenever a topic filter was present.
         filter_clause, filter_params, _needs_ci = _build_metadata_clause(
-            metadata_filters, param_offset=3
+            metadata_filters, param_offset=4
         )
         # Same always-select-ci-columns reasoning as search_reels_dense above.
         ci_join = 'LEFT JOIN "ContentIntelligence" ci ON ci."reelId" = r."id"'

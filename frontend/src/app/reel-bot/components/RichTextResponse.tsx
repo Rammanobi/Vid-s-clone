@@ -100,6 +100,63 @@ export function RichTextResponse({ content }: RichTextResponseProps) {
           </blockquote>
         )
       }
+      // Handle markdown tables: a "| a | b |" row followed by a
+      // "|---|---|" separator row starts a table; consume every following
+      // "|"-row as data. Without this, table rows fell through to the plain
+      // "line" branch below - shown as raw "| 156.59 | 190.96 |" text in one
+      // overflowing paragraph instead of a table.
+      else if (line.startsWith("|") && lines[i + 1]?.trim().match(/^\|[\s:-]+\|/)) {
+        if (currentList.length) {
+          elements.push(renderList(currentList, listType))
+          currentList = []
+          listType = null
+        }
+        const parseRow = (row: string) =>
+          row
+            .trim()
+            .replace(/^\||\|$/g, "")
+            .split("|")
+            .map((cell) => cell.trim())
+
+        const header = parseRow(line)
+        let j = i + 2 // skip header + separator row
+        const bodyRows: string[][] = []
+        while (j < lines.length && lines[j].trim().startsWith("|")) {
+          bodyRows.push(parseRow(lines[j]))
+          j++
+        }
+
+        elements.push(
+          <div key={`table-${i}`} className="my-3 overflow-x-auto rounded-lg border border-amber-600/20">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-amber-600/10">
+                  {header.map((cell, idx) => (
+                    <th
+                      key={idx}
+                      className="px-3 py-2 text-left font-semibold text-amber-300 border-b border-amber-600/20 whitespace-nowrap"
+                    >
+                      {renderInlineFormatting(cell)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bodyRows.map((row, rIdx) => (
+                  <tr key={rIdx} className="border-b border-border/20 last:border-0">
+                    {row.map((cell, cIdx) => (
+                      <td key={cIdx} className="px-3 py-2 whitespace-nowrap">
+                        {renderInlineFormatting(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+        i = j - 1
+      }
       // Regular text with inline formatting
       else if (line) {
         if (currentList.length) {

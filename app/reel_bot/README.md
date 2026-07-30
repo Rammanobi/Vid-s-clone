@@ -137,7 +137,15 @@ Once ingestion completes:
 3. Builds a prompt with reel data (transcript, views, likes, keywords)
 4. Sends to LLM and returns data-grounded response
 
-**System Prompt**: Enforces strict data grounding — LLM refuses generic advice and quotes transcripts directly.
+**System Prompt**: Enforces strict data grounding — LLM refuses generic advice and quotes transcripts directly. Edit it live at `PUT /admin/prompts/reel_bot_chat` (see "Live-editable prompts" below) — no redeploy needed.
+
+### Caching
+
+Reconnecting an already-ingested handle no longer always re-fetches from Hiker. If the handle's stored reels were updated within `REEL_BOT_CACHE_HOURS` (default 24), ingestion serves the cached rows from Neon instead of a live Hiker call — saves API credits and ~30-45s on repeat connects. Force a fresh fetch by deleting the handle's `ReelBotReel` rows, or lowering `REEL_BOT_CACHE_HOURS`.
+
+### Reel hyperlinks
+
+Chat responses reference reels as clickable links instead of "Reel N" — e.g. "the GitHub Claude Code reel" links straight to the real `instagram.com/reel/{code}/` post. Requires the `permalink` column (backfilled automatically on next ingest for any handle ingested before this feature shipped).
 
 ## Public Access (Cloudflare Tunnel)
 
@@ -269,6 +277,7 @@ id (UUID, PK)
 instagramHandle (string)
 instagramReelId (string, unique per handle)
 videoUrl (string)
+permalink (string, nullable) — public https://instagram.com/reel/{code}/ link, used for chat hyperlinks
 caption (text, nullable)
 views, likes, commentsCount, shares (int)
 durationSec (float)
@@ -277,7 +286,7 @@ rawTranscript (text, nullable) — raw output from Groq
 cleanTranscript (text, nullable) — cleaned text
 wordCount, wpm (int, nullable)
 topKeywords (string[]) — top 3-5 keywords
-createdAt, updatedAt (timestamp)
+createdAt, updatedAt (timestamp) — updatedAt drives the 24h ingestion cache
 ```
 
 ### ReelBotSession
@@ -297,6 +306,25 @@ content (text)
 createdAt (timestamp)
 ```
 
+## Live-editable prompts (Neon, no redeploy)
+
+All 6 LLM system prompts across the app — including `reel_bot_chat` — live in a
+`SystemPrompt` table in Neon, not just hardcoded strings. An in-process cache
+(`app/prompts.py`) is loaded at startup and refreshed on every write, so editing
+a prompt takes effect on the very next request — no restart, no redeploy.
+
+```bash
+# List current prompts + whether each is coming from the DB, an env var, or the built-in default
+GET /admin/prompts
+
+# Edit one live
+PUT /admin/prompts/reel_bot_chat
+{ "content": "new prompt text..." }
+```
+
+Precedence: DB row > env var (`PROMPT_REEL_BOT_CHAT` etc.) > built-in default in
+`app/prompts.py`. Both endpoints require the same admin auth as the rest of the API.
+
 ## Development Notes
 
 - **Isolation**: No imports from main app except `app.config` (for DATABASE_URL) and `app.transcription.processor` (for Whisper wrapper)
@@ -304,6 +332,15 @@ createdAt (timestamp)
 - **Error handling**: Public endpoints return 4xx/5xx errors with detail messages; rate limits return 429
 - **Logging**: Structured JSON logs via `app.logging_setup`
 - **No authentication**: All endpoints are public; cost protection via rate limiting only
+
+## Changelog
+
+### 2026-07-30
+- Moved all 6 LLM system prompts (including this module's) from code/env vars into a Neon `SystemPrompt` table, editable live via `GET`/`PUT /admin/prompts/{key}` with zero redeploy.
+- Fixed the chat engine over-using markdown tables: qualitative/strategic questions ("what's the vibe of my content?", "should I post more often?") were returning full metrics tables instead of prose. Tightened `reel_bot_chat` (and `reasoner`) to use tables only for explicit comparison/ranking/table requests.
+- Fixed literal `<br>` tags rendering as visible text instead of line breaks in the frontend's markdown renderer.
+- Added a "24-hour ingestion cache": reconnecting an already-ingested handle now serves stored Neon data instead of re-calling Hiker + re-transcribing, when the data is still fresh (`REEL_BOT_CACHE_HOURS`, default 24).
+- Reels are now referenced as clickable hyperlinks to the real Instagram post (e.g. "the GitHub Claude Code reel") instead of "Reel N" - backed by a new `permalink` column captured from Hiker's `code` field at ingest time.
 
 ## Future Improvements
 

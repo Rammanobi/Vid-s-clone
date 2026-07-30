@@ -23,7 +23,7 @@ from app.middleware import (
 )
 from app.monitoring import start_metrics_server
 from app.reel_bot.reel_router import router as reel_bot_router
-from app.routes import agent, analytics, auth, content, creator, health, ingest, knowledge, pipeline, session
+from app.routes import admin_prompts, agent, analytics, auth, content, creator, health, ingest, knowledge, pipeline, session
 
 logger = get_logger(__name__)
 
@@ -89,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge.router)
     app.include_router(agent.router)
     app.include_router(pipeline.router)
+    app.include_router(admin_prompts.router)
     app.include_router(reel_bot_router)
 
     app.dependency_overrides[get_db_dependency] = get_db
@@ -107,6 +108,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         max_inactive_connection_lifetime=settings.db_pool_max_lifetime,
     )
     await db_client.connect()
+
+    from app.prompts import prompt_cache
+
+    await prompt_cache.refresh(db_client)
 
     if settings.redis_url:
         redis_client = get_redis()

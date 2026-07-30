@@ -25,11 +25,11 @@ logger = get_logger(__name__)
 CLARIFYING_THRESHOLD = 0.5
 HIGH_CONFIDENCE_THRESHOLD = 0.8
 
-from app.prompts import (  # noqa: F401  (re-exported for existing importers)
-    INTENT_EXTRACTION_SYSTEM_PROMPT,
-    QUERY_REWRITE_SYSTEM_PROMPT,
-    REASONER_SYSTEM_PROMPT,
-    RECOMMENDATION_SYSTEM_PROMPT,
+from app.prompts import (
+    get_intent_extraction_prompt,
+    get_query_rewrite_prompt,
+    get_reasoner_prompt,
+    get_recommendation_prompt,
 )
 
 
@@ -71,7 +71,7 @@ async def query_understanding_node(
     if llm:
         try:
             result = await llm.extract_structured(
-                system_prompt=INTENT_EXTRACTION_SYSTEM_PROMPT,
+                system_prompt=get_intent_extraction_prompt(),
                 user_prompt=f"User query: {user_query}",
                 schema={"type": "json_object"},
             )
@@ -128,7 +128,7 @@ async def query_transformation_node(
             if intent.get("topic"):
                 context += f"\nTopic: {intent['topic']}"
             result = await llm.extract_structured(
-                system_prompt=QUERY_REWRITE_SYSTEM_PROMPT,
+                system_prompt=get_query_rewrite_prompt(),
                 user_prompt=f"{context}\nOriginal query: {user_query}",
                 schema={"type": "json_object"},
             )
@@ -526,7 +526,7 @@ async def conversational_reasoner_node(
             recent = messages[-6:] if len(messages) > 6 else messages
 
             llm_messages = [
-                {"role": "system", "content": REASONER_SYSTEM_PROMPT},
+                {"role": "system", "content": get_reasoner_prompt()},
             ]
             for msg in recent:
                 role = msg.get("role", "user")
@@ -576,7 +576,7 @@ async def recommendation_generator_node(
         context_str = _format_context_for_llm(ranked_context)
         try:
             result = await llm.extract_structured(
-                system_prompt=RECOMMENDATION_SYSTEM_PROMPT,
+                system_prompt=get_recommendation_prompt(),
                 user_prompt=(
                     f"Analysis: {response}\n\nEvidence:\n{context_str}\n\n"
                     f"Generate actionable content strategy recommendations."

@@ -256,6 +256,16 @@ model Session {
   agentRuns    AgentExecutionLog[]
 }
 
+// LLM system prompts, editable from Neon without a redeploy (see app/prompts.py
+// and PUT /admin/prompts/{key}). "key" is a natural key (intent_extraction,
+// query_rewrite, reasoner, recommendation, content_intelligence,
+// reel_bot_chat) - only 6 rows expected, so no surrogate id.
+model SystemPrompt {
+  key          String   @id
+  content      String   @db.Text
+  updatedAt    DateTime @updatedAt
+}
+
 model ChatMessage {
   id           String   @id @default(uuid())
   sessionId    String

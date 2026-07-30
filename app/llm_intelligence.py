@@ -9,7 +9,7 @@ from app.schema_validator import ContentIntelligenceSchema
 
 logger = get_logger(__name__)
 
-from app.prompts import CONTENT_INTELLIGENCE_SYSTEM_PROMPT as _SYSTEM_PROMPT
+from app.prompts import get_content_intelligence_prompt
 
 PARTIAL_INPUT_THRESHOLD = 2
 
@@ -81,7 +81,7 @@ async def extract_intelligence_with_llm(
 
     try:
         result = await client.extract_structured(
-            system_prompt=_SYSTEM_PROMPT,
+            system_prompt=get_content_intelligence_prompt(),
             user_prompt=user_prompt,
         )
         logger.debug(

@@ -1,15 +1,25 @@
-"""LLM prompt templates, overridable from .env.
+"""LLM prompt templates, editable from Neon without a redeploy.
 
-Each prompt is read from an environment variable at import time, falling back to
-the built-in default. The defaults are duplicated in .env.example so a fresh
-clone works before anyone writes a .env.
+Precedence per prompt: DB row (table "SystemPrompt") > env var override >
+built-in default. The cache is populated once at app startup and refreshed
+whenever a prompt is edited through PUT /admin/prompts/{key} - no restart
+needed to pick up a change. If the table is empty or unreachable, the app
+still works off env vars / defaults, so this is additive, not a hard
+dependency.
 """
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 from app.config import settings  # noqa: F401  (ensures load_dotenv() has run)
+from app.logging_setup import get_logger
+
+if TYPE_CHECKING:
+    from app.db import DatabaseClient
+
+logger = get_logger(__name__)
 
 _DEFAULT_INTENT_EXTRACTION = (
     "Extract structured intent from a user's query about Instagram Reels content strategy. "
@@ -27,7 +37,9 @@ _DEFAULT_QUERY_REWRITE = (
 _DEFAULT_REASONER = (
     "You are a content strategy analyst for Instagram Reels creators. Based on the evidence "
     "provided, generate a clear, actionable answer. Base your answer strictly on the evidence. "
-    "If the evidence is insufficient, acknowledge limitations."
+    "If the evidence is insufficient, acknowledge limitations. Write in prose by default - use "
+    "a markdown table only if the user explicitly asked for a comparison, ranking, or table, or "
+    "the answer is inherently a set of per-reel numbers."
 )
 
 _DEFAULT_RECOMMENDATION = (
@@ -58,38 +70,114 @@ Rules:
 - Be concise
 - Return ONLY valid JSON, no markdown"""
 
+_DEFAULT_REEL_BOT_CHAT = """You are an AI assistant analyzing Instagram Reels performance ONLY using provided data.
 
-def _prompt(env_var: str, default: str) -> str:
-    value = os.environ.get(env_var, "").strip()
-    return value or default
+CRITICAL RULES:
+1. **ONLY reference data from the REEL DATA section below.** Do NOT use general knowledge or generic advice.
+2. **Quote transcripts directly** when discussing content. Use exact words from the cleaned transcript.
+3. **Be specific with numbers.** Reference exact views, likes, comments, shares, WPM from the data — inline in your sentences, using **bold**, unless a table is warranted by rule 6.
+4. **If a reel has no transcript, explicitly state:** "Transcript not available for Reel X."
+5. **Data-driven insights only.** You CAN provide tips/recommendations IF they reference specific reel performance metrics. Say "Based on Reel X having Y views..." not "typically audiences prefer...".
+6. **Use a markdown table ONLY when the user asked for one.** Build a table only if the user explicitly requests a comparison, ranking, list, or table, OR the answer is inherently a set of per-reel numbers (e.g. "rank my reels by views"). For qualitative, strategic, opinion, single-reel, or "what should I do" questions, answer in prose with bolded numbers and quoted transcript snippets inline. Never use a table to hold qualitative text - a table is for numbers, not for themes, tones, or categories with example quotes. If you want to group themes with supporting quotes, use a bolded theme name followed by a nested bullet list of quotes, not a table row.
+7. **Never write literal "<br>" or other HTML tags in your answer.** Use plain markdown line breaks (a blank line, or a new bullet) instead - the renderer does not interpret HTML tags as formatting.
+8. **Match the shape of the question.** A one-line question gets a short answer. Do not pad a qualitative answer with metrics the user did not ask about."""
+
+_DEFAULTS: dict[str, str] = {
+    "intent_extraction": _DEFAULT_INTENT_EXTRACTION,
+    "query_rewrite": _DEFAULT_QUERY_REWRITE,
+    "reasoner": _DEFAULT_REASONER,
+    "recommendation": _DEFAULT_RECOMMENDATION,
+    "content_intelligence": _DEFAULT_CONTENT_INTELLIGENCE,
+    "reel_bot_chat": _DEFAULT_REEL_BOT_CHAT,
+}
+
+_ENV_VARS: dict[str, str] = {
+    "intent_extraction": "PROMPT_INTENT_EXTRACTION",
+    "query_rewrite": "PROMPT_QUERY_REWRITE",
+    "reasoner": "PROMPT_REASONER",
+    "recommendation": "PROMPT_RECOMMENDATION",
+    "content_intelligence": "PROMPT_CONTENT_INTELLIGENCE",
+    "reel_bot_chat": "PROMPT_REEL_BOT_CHAT",
+}
+
+PROMPT_KEYS: tuple[str, ...] = tuple(_DEFAULTS.keys())
 
 
-INTENT_EXTRACTION_SYSTEM_PROMPT = _prompt(
-    "PROMPT_INTENT_EXTRACTION", _DEFAULT_INTENT_EXTRACTION
-)
-QUERY_REWRITE_SYSTEM_PROMPT = _prompt(
-    "PROMPT_QUERY_REWRITE", _DEFAULT_QUERY_REWRITE
-)
-REASONER_SYSTEM_PROMPT = _prompt(
-    "PROMPT_REASONER", _DEFAULT_REASONER
-)
-RECOMMENDATION_SYSTEM_PROMPT = _prompt(
-    "PROMPT_RECOMMENDATION", _DEFAULT_RECOMMENDATION
-)
-CONTENT_INTELLIGENCE_SYSTEM_PROMPT = _prompt(
-    "PROMPT_CONTENT_INTELLIGENCE", _DEFAULT_CONTENT_INTELLIGENCE
-)
+class PromptCache:
+    def __init__(self) -> None:
+        self._cache: dict[str, str] = {}
+
+    async def refresh(self, db: "DatabaseClient") -> None:
+        try:
+            rows = await db.get_all_prompts()
+            self._cache = {row["key"]: row["content"] for row in rows}
+            logger.info("prompt_cache_refreshed", count=len(self._cache))
+        except Exception as exc:
+            logger.warning("prompt_cache_refresh_failed", error=str(exc))
+
+    def get(self, key: str) -> str:
+        cached = self._cache.get(key, "").strip() if key in self._cache else ""
+        if cached:
+            return cached
+        env_value = os.environ.get(_ENV_VARS[key], "").strip()
+        return env_value or _DEFAULTS[key]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            key: {"content": self.get(key), "source": self._source(key)}
+            for key in PROMPT_KEYS
+        }
+
+    def _source(self, key: str) -> str:
+        if self._cache.get(key, "").strip():
+            return "database"
+        if os.environ.get(_ENV_VARS[key], "").strip():
+            return "env"
+        return "default"
+
+
+prompt_cache = PromptCache()
+
+
+def get_intent_extraction_prompt() -> str:
+    return prompt_cache.get("intent_extraction")
+
+
+def get_query_rewrite_prompt() -> str:
+    return prompt_cache.get("query_rewrite")
+
+
+def get_reasoner_prompt() -> str:
+    return prompt_cache.get("reasoner")
+
+
+def get_recommendation_prompt() -> str:
+    return prompt_cache.get("recommendation")
+
+
+def get_content_intelligence_prompt() -> str:
+    return prompt_cache.get("content_intelligence")
+
+
+def get_reel_bot_chat_prompt() -> str:
+    return prompt_cache.get("reel_bot_chat")
 
 
 if __name__ == "__main__":
-    # ponytail: smallest check that fails if env override or fallback breaks
-    assert INTENT_EXTRACTION_SYSTEM_PROMPT, "intent prompt empty"
-    assert "hook_type" in CONTENT_INTELLIGENCE_SYSTEM_PROMPT, "CI prompt truncated"
+    # ponytail: smallest check that fails if env override, DB override, or
+    # fallback breaks
+    assert get_intent_extraction_prompt(), "intent prompt empty"
+    assert "hook_type" in get_content_intelligence_prompt(), "CI prompt truncated"
 
-    os.environ["PROMPT_REASONER"] = "overridden"
-    assert _prompt("PROMPT_REASONER", _DEFAULT_REASONER) == "overridden", "env override failed"
+    os.environ["PROMPT_REASONER"] = "env-overridden"
+    assert prompt_cache.get("reasoner") == "env-overridden", "env override failed"
 
+    prompt_cache._cache["reasoner"] = "db-overridden"
+    assert prompt_cache.get("reasoner") == "db-overridden", "db override failed"
+    assert prompt_cache._source("reasoner") == "database"
+
+    prompt_cache._cache = {}
     os.environ["PROMPT_REASONER"] = "   "
-    assert _prompt("PROMPT_REASONER", _DEFAULT_REASONER) == _DEFAULT_REASONER, "blank should fall back"
+    assert prompt_cache.get("reasoner") == _DEFAULT_REASONER, "blank should fall back"
 
-    print("prompts OK — env override and fallback both work")
+    print("prompts OK — DB override, env override, and fallback all work")

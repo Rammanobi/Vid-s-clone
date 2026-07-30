@@ -1032,6 +1032,29 @@ class DatabaseClient:
 
         return fused[:final_limit]
 
+    async def get_all_prompts(self) -> list[dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch('SELECT "key", "content", "updatedAt" FROM "SystemPrompt"')
+            return [dict(row) for row in rows]
+
+    async def upsert_prompt(self, key: str, content: str) -> dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO "SystemPrompt" ("key", "content", "updatedAt")
+                VALUES ($1, $2, now())
+                ON CONFLICT ("key") DO UPDATE SET "content" = $2, "updatedAt" = now()
+                RETURNING "key", "content", "updatedAt"
+                """,
+                key,
+                content,
+            )
+            return dict(row)
+
 
 def _format_retrieval_row(row: asyncpg.Record) -> dict[str, Any]:
     contexts: list[str] = []

@@ -24,6 +24,9 @@ from app.reel_bot.reel_models import (
     ReelIngestResponse,
 )
 from app.reel_bot.reel_whisper import transcribe_reel
+from app.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 router = APIRouter(prefix="/reel-bot", tags=["reel-bot"])
@@ -128,8 +131,36 @@ async def ingest_reels(
         raise HTTPException(status_code=400, detail="Invalid Instagram handle")
 
     try:
-        hiker = await _get_hiker()
         db = await _get_db()
+
+        last_updated = await db.get_reels_freshness(handle)
+        if last_updated is not None:
+            age_hours = (datetime.now() - last_updated).total_seconds() / 3600
+            if age_hours < settings.cache_hours:
+                cached_reels = await db.get_recent_reels(handle, limit=settings.max_reels)
+                wpm_values = [r["wpm"] for r in cached_reels if r.get("wpm")]
+                avg_wpm = (
+                    round(sum(wpm_values) / len(wpm_values), 2) if wpm_values else None
+                )
+                all_keywords = []
+                for reel in cached_reels:
+                    all_keywords.extend(reel.get("topKeywords") or [])
+                unique_keywords = list(dict.fromkeys(all_keywords))[:5]
+
+                logger.info(
+                    "reel_bot_ingest_cache_hit",
+                    handle=handle,
+                    age_hours=round(age_hours, 1),
+                    reels=len(cached_reels),
+                )
+                return ReelIngestResponse(
+                    instagram_handle=handle,
+                    reels_synced=len(cached_reels),
+                    avg_wpm=avg_wpm,
+                    top_keywords=unique_keywords,
+                )
+
+        hiker = await _get_hiker()
 
         user_data = await hiker.fetch_user_by_username(handle)
         if not user_data or not user_data.get("pk"):

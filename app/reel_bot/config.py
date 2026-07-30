@@ -49,6 +49,9 @@ class Settings:
     memory_window: int = field(
         default_factory=lambda: int(os.environ.get("REEL_BOT_MEMORY_WINDOW", "10"))
     )
+    cache_hours: int = field(
+        default_factory=lambda: int(os.environ.get("REEL_BOT_CACHE_HOURS", "24"))
+    )
 
     def __post_init__(self) -> None:
         if not self.hiker_api_token:

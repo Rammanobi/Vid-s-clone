@@ -93,6 +93,17 @@ class ReelBotDatabaseClient:
 
         return count
 
+    async def get_reels_freshness(self, handle: str) -> datetime | None:
+        """Most recent updatedAt across this handle's stored reels, or None if
+        never ingested. Used to skip a live Hiker re-fetch when data is still
+        fresh - each ingest call spends real Hiker API credits."""
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            return await conn.fetchval(
+                'SELECT MAX("updatedAt") FROM "ReelBotReel" WHERE "instagramHandle" = $1',
+                handle,
+            )
+
     async def get_recent_reels(self, handle: str, limit: int = 20) -> list[dict[str, Any]]:
         """Fetch recent reels for a handle."""
         pool = await self._ensure_pool()

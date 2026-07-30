@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Send, Loader2, Plus } from "lucide-react"
+import { Send, Loader2, Plus, CheckCircle2 } from "lucide-react"
 import { api, type ReelBotIngestResponse } from "@/lib/api"
 import { PromptChips } from "./components/PromptChips"
 import { MessageBubble } from "./components/MessageBubble"
+import { PremiumLoadingIndicator } from "./components/PremiumLoadingIndicator"
 
 type Phase = "ingestion" | "chat"
 type IngestPhase = "idle" | "fetching" | "downloading" | "transcribing" | "processing"
@@ -219,30 +220,38 @@ export default function ReelBotPage() {
               )}
 
               {ingestResult && (
-                <div className="p-4 bg-green-500/10 border border-green-500/30 rounded space-y-3 animate-fade-in">
-                  <div>
-                    <p className="text-green-400 font-medium">✓ Connected!</p>
-                    <p className="text-foreground/70 text-sm mt-1">
-                      {ingestResult.reels_synced} reels analyzed
-                    </p>
+                <div className="p-6 bg-gradient-to-r from-green-600/10 to-emerald-600/5 border border-green-600/30 rounded-xl space-y-4 animate-fade-in shadow-lg">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-6 h-6 text-green-400" />
+                    <div>
+                      <p className="text-green-400 font-bold text-lg">Connected & Analyzed!</p>
+                      <p className="text-foreground/70 text-sm">
+                        Successfully analyzed {ingestResult.reels_synced} reels
+                      </p>
+                    </div>
                   </div>
 
-                  {ingestResult.avg_wpm && (
-                    <div className="text-sm text-foreground/60">
-                      <span className="font-medium">Avg WPM:</span>{" "}
-                      {ingestResult.avg_wpm.toFixed(0)} words/min
+                  <div className="grid grid-cols-2 gap-3">
+                    {ingestResult.avg_wpm && (
+                      <div className="bg-secondary/40 border border-border/30 rounded-lg p-3">
+                        <p className="text-foreground/60 text-xs font-medium">Average Speaking Speed</p>
+                        <p className="text-xl font-bold text-amber-300 mt-1">{ingestResult.avg_wpm.toFixed(0)} WPM</p>
+                      </div>
+                    )}
+                    <div className="bg-secondary/40 border border-border/30 rounded-lg p-3">
+                      <p className="text-foreground/60 text-xs font-medium">Reels Analyzed</p>
+                      <p className="text-xl font-bold text-green-400 mt-1">{ingestResult.reels_synced}</p>
                     </div>
-                  )}
+                  </div>
 
                   {ingestResult.top_keywords.length > 0 && (
-                    <div className="text-sm text-foreground/60">
-                      <span className="font-medium">Top Topics:</span>
-                      <div className="flex flex-wrap gap-2 mt-2">
+                    <div>
+                      <p className="text-foreground/70 font-medium text-sm mb-2">Top Topics Discussed:</p>
+                      <div className="flex flex-wrap gap-2">
                         {ingestResult.top_keywords.map((kw) => (
                           <Badge
                             key={kw}
-                            variant="secondary"
-                            className="bg-amber-600/20 text-amber-300 border-amber-600/30"
+                            className="bg-amber-600/30 text-amber-300 border-amber-600/50 font-medium"
                           >
                             {kw}
                           </Badge>
@@ -253,7 +262,7 @@ export default function ReelBotPage() {
 
                   <Button
                     onClick={() => setPhase("chat")}
-                    className="w-full mt-4 bg-amber-600/80 hover:bg-amber-600 text-white"
+                    className="w-full mt-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white font-bold py-3 text-base shadow-lg hover:shadow-xl transition-all"
                   >
                     Start Chatting
                   </Button>
@@ -273,19 +282,28 @@ export default function ReelBotPage() {
   return (
     <div className="w-full h-screen flex flex-col bg-background">
       {/* Header */}
-      <div className="border-b border-border/30 bg-secondary/5 px-4 py-3 flex-shrink-0">
+      <div className="border-b border-amber-600/20 bg-gradient-to-r from-secondary/40 to-transparent backdrop-blur-sm px-6 py-5 flex-shrink-0">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">Reel Bot</h1>
-            <p className="text-xs text-foreground/50">
-              @{handle} • {ingestResult?.reels_synced || 0} reels analyzed
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-r from-amber-600 to-amber-700 flex items-center justify-center shadow-lg">
+              <span className="text-lg">🤖</span>
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Reel Bot</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-sm text-foreground/70 font-medium">@{handle}</p>
+                <div className="flex items-center gap-1 text-sm text-green-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  {ingestResult?.reels_synced || 0} reels analyzed
+                </div>
+              </div>
+            </div>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={handleReset}
-            className="text-foreground/60 hover:text-foreground"
+            className="text-foreground/60 hover:text-foreground hover:bg-amber-600/10 transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
             New Account
@@ -295,7 +313,7 @@ export default function ReelBotPage() {
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto w-full">
-        <div className="w-full max-w-2xl mx-auto px-4 py-4 space-y-4">
+        <div className="w-full max-w-3xl mx-auto px-6 py-8 space-y-6">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center">
               <div className="space-y-4">
@@ -325,35 +343,19 @@ export default function ReelBotPage() {
             ))
           )}
 
-          {chatLoading && (
-            <div className="flex justify-start">
-              <div className="bg-gradient-to-r from-secondary/70 to-secondary/50 border border-border/40 rounded-2xl px-5 py-4 max-w-sm shadow-sm">
-                <div className="space-y-2">
-                  <div className="flex gap-2 items-center">
-                    <div className="flex gap-1">
-                      <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-bounce" />
-                      <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
-                      <div className="w-2.5 h-2.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                    </div>
-                    <span className="text-amber-400 font-medium text-sm">Analyzing your reels...</span>
-                  </div>
-                  <p className="text-foreground/60 text-xs pl-9">This may take a moment as we review your content</p>
-                </div>
-              </div>
-            </div>
-          )}
+          {chatLoading && <PremiumLoadingIndicator />}
 
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Input Area - Fixed at Bottom */}
-      <div className="w-full bg-gradient-to-t from-secondary/20 via-secondary/10 to-transparent px-4 py-6 flex-shrink-0">
-        <form onSubmit={handleSendMessage} className="w-full max-w-2xl mx-auto">
-          <div className="relative flex items-end gap-3 bg-secondary/60 border border-border/40 rounded-3xl px-4 py-3 transition-all hover:border-border/60 focus-within:border-amber-500/50 focus-within:ring-2 focus-within:ring-amber-500/20">
+      <div className="w-full bg-gradient-to-t from-secondary/30 via-secondary/15 to-transparent px-6 py-8 flex-shrink-0 border-t border-border/20">
+        <form onSubmit={handleSendMessage} className="w-full max-w-3xl mx-auto">
+          <div className="relative flex items-end gap-3 bg-gradient-to-r from-secondary/60 to-secondary/40 backdrop-blur-sm border border-amber-600/30 rounded-3xl px-6 py-4 transition-all duration-200 hover:border-amber-600/50 hover:bg-gradient-to-r hover:from-secondary/70 hover:to-secondary/50 focus-within:border-amber-500/60 focus-within:ring-2 focus-within:ring-amber-500/30">
             {/* Textarea for growing input */}
             <textarea
-              placeholder="Ask about your reels, content strategy, or performance..."
+              placeholder="Ask about your reels, engagement trends, content strategy..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={chatLoading}
@@ -363,7 +365,7 @@ export default function ReelBotPage() {
                   handleSendMessage(input)
                 }
               }}
-              className="flex-1 bg-transparent text-foreground placeholder:text-foreground/50 text-base resize-none outline-none min-h-12 max-h-24 py-1"
+              className="flex-1 bg-transparent text-foreground placeholder:text-foreground/50 text-base resize-none outline-none min-h-14 max-h-32 py-2 font-medium"
               rows={1}
             />
 
@@ -371,7 +373,7 @@ export default function ReelBotPage() {
             <Button
               type="submit"
               disabled={chatLoading || !input.trim()}
-              className="flex-shrink-0 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white rounded-full p-3 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 h-10 w-10 flex items-center justify-center"
+              className="flex-shrink-0 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-full p-3 transition-all duration-200 shadow-lg hover:shadow-2xl hover:scale-110 disabled:opacity-50 disabled:scale-100 h-12 w-12 flex items-center justify-center"
             >
               {chatLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -380,8 +382,8 @@ export default function ReelBotPage() {
               )}
             </Button>
           </div>
-          <p className="text-xs text-foreground/40 mt-2 text-center">
-            Press Enter to send, Shift+Enter for new line
+          <p className="text-xs text-foreground/40 mt-3 text-center">
+            Press Enter to send • Shift+Enter for new line
           </p>
         </form>
       </div>

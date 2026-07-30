@@ -1,0 +1,9 @@
+tunnel: reel-bot-tunnel
+credentials-file: C:\Users\aseem\.cloudflared\reel-bot-tunnel.json
+
+ingress:
+  - hostname: reel-bot-backend.trycloudflare.com
+    service: http://localhost:8000
+  - hostname: reel-bot-frontend.trycloudflare.com
+    service: http://localhost:3000
+  - service: http_status:404

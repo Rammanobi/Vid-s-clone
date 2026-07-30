@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { ChevronRight } from "lucide-react"
 
 interface PromptChipsProps {
   suggestions: string[]
@@ -13,7 +14,7 @@ export function PromptChips({
   disabled,
 }: PromptChipsProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-md">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
       {suggestions.map((suggestion, idx) => (
         <Button
           key={idx}
@@ -21,15 +22,17 @@ export function PromptChips({
           onClick={() => onSelect(suggestion)}
           disabled={disabled}
           className={cn(
-            "justify-start h-auto py-2 px-3 text-left text-sm",
-            "bg-secondary/30 border-border/30 text-foreground/80",
-            "hover:bg-secondary/50 hover:text-foreground hover:border-border/50",
+            "justify-start h-auto py-3 px-4 text-left text-sm font-medium",
+            "bg-gradient-to-r from-secondary/40 to-secondary/20 border border-amber-600/30",
+            "text-foreground/90 hover:text-foreground",
+            "hover:bg-gradient-to-r hover:from-amber-600/20 hover:to-amber-600/10 hover:border-amber-600/50",
             "disabled:opacity-50 disabled:cursor-not-allowed",
-            "transition-colors"
+            "transition-all duration-200 hover:scale-105 hover:shadow-lg",
+            "group"
           )}
         >
-          <span className="text-amber-600/60 mr-2">→</span>
-          {suggestion}
+          <ChevronRight className="w-4 h-4 mr-2 text-amber-400 group-hover:translate-x-1 transition-transform" />
+          <span>{suggestion}</span>
         </Button>
       ))}
     </div>

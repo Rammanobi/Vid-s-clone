@@ -258,7 +258,7 @@ export default function ReelBotPage() {
         </div>
 
         {sidebarOpen && (
-          <div className="flex-1 overflow-y-auto px-2 flex flex-col gap-1">
+          <div className="flex-1 overflow-y-auto px-2 flex flex-col gap-1 reel-bot-scrollbar">
             <span className="px-2 py-1 text-[11px] text-[#4c4546] font-medium uppercase tracking-wider">
               History
             </span>
@@ -291,7 +291,7 @@ export default function ReelBotPage() {
             {sidebarOpen && (
               <div className="flex flex-col min-w-0 overflow-hidden">
                 <span className="text-sm font-bold truncate text-[#1a1c1c]">@{handle}</span>
-                <span className="text-[10px] px-1.5 py-0.5 bg-[#e8e8e8] border border-[#cfc4c5] rounded w-fit">
+                <span className="text-[10px] text-[#1a1c1c] px-1.5 py-0.5 bg-[#e8e8e8] border border-[#cfc4c5] rounded w-fit">
                   {ingestResult?.reels_synced ?? 0} reels analyzed
                 </span>
               </div>
@@ -316,7 +316,7 @@ export default function ReelBotPage() {
           <span className="text-sm text-[#4c4546]">{ingestResult?.reels_synced ?? 0} reels analyzed</span>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-10 flex flex-col gap-6 w-full max-w-3xl mx-auto pb-32">
+        <div className="flex-1 overflow-y-auto px-6 py-10 flex flex-col gap-6 w-full max-w-3xl mx-auto pb-32 reel-bot-scrollbar">
           {messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center">
               <div className="w-16 h-16 rounded-2xl bg-[#f9f9f9] flex items-center justify-center mb-6 border border-[#cfc4c5] shadow-sm">

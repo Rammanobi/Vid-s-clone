@@ -91,3 +91,24 @@ body {
 .dark .scrollbar-thin::-webkit-scrollbar-thumb {
   background: hsl(0 0% 30%);
 }
+
+/* Reel Bot's sidebar is always light/monochrome, independent of the app's
+   dark/light theme toggle - scrollbar-thin's ".dark" variant (30% lightness)
+   read as a harsh, near-black bar against its white background. This stays
+   pale regardless of the html.dark class. */
+.reel-bot-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.reel-bot-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.reel-bot-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(0 0% 85%) !important;
+  border-radius: 2px;
+}
+
+.reel-bot-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(0 0% 75%) !important;
+}

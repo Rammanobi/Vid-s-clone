@@ -166,7 +166,8 @@ export default function ReelBotPage() {
       <div className="min-h-screen flex items-center justify-center bg-[#f9f9f9] p-6">
         <div className="w-full max-w-[420px] bg-white p-10 rounded-xl border border-[#cfc4c5] shadow-sm flex flex-col items-center text-center">
           <div className="w-24 h-24 mb-6 rounded-full bg-[#f3f3f4] border border-[#cfc4c5] flex items-center justify-center overflow-hidden">
-            <span className="text-4xl">🤖</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/reel-bot/logo.png" alt="Reel Bot" className="w-16 h-16 object-contain" />
           </div>
           <h1 className="text-[36px] leading-[44px] font-semibold tracking-tight text-[#1a1c1c] mb-2">
             Reel Bot
@@ -232,7 +233,8 @@ export default function ReelBotPage() {
         <div className="h-16 flex items-center px-4 border-b border-[#cfc4c5] justify-between">
           {sidebarOpen && (
             <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
-              <span className="text-lg flex-shrink-0">🤖</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/reel-bot/logo.png" alt="Reel Bot" className="h-6 w-6 flex-shrink-0 object-contain" />
               <span className="text-lg font-semibold tracking-tight text-[#1a1c1c]">Reel Bot</span>
             </div>
           )}
@@ -318,7 +320,8 @@ export default function ReelBotPage() {
           {messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center">
               <div className="w-16 h-16 rounded-2xl bg-[#f9f9f9] flex items-center justify-center mb-6 border border-[#cfc4c5] shadow-sm">
-                <span className="text-2xl">🤖</span>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/reel-bot/logo.png" alt="Reel Bot" className="w-8 h-8 object-contain" />
               </div>
               <h1 className="text-[28px] leading-[36px] font-semibold text-[#1a1c1c] mb-2 tracking-tight">
                 Reel Analysis AI

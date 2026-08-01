@@ -22,6 +22,10 @@ from app.reel_bot.reel_models import (
     ReelChatResponse,
     ReelIngestPayload,
     ReelIngestResponse,
+    ReelChatMessage,
+    ReelSessionListResponse,
+    ReelSessionMessagesResponse,
+    ReelSessionSummary,
 )
 from app.reel_bot.reel_whisper import transcribe_reel
 from app.logging_setup import get_logger
@@ -254,3 +258,40 @@ async def chat(
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions", response_model=ReelSessionListResponse)
+async def list_sessions(instagram_handle: str) -> ReelSessionListResponse:
+    """Recent chat sessions for a handle, for a sidebar history list."""
+    handle = instagram_handle.lstrip("@").lower()
+    if not handle:
+        raise HTTPException(status_code=400, detail="Invalid Instagram handle")
+
+    db = await _get_db()
+    rows = await db.list_sessions(handle)
+
+    return ReelSessionListResponse(
+        sessions=[
+            ReelSessionSummary(
+                session_id=row["session_id"],
+                updated_at=row["updatedAt"].isoformat(),
+                preview=row["preview"][:80],
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.get("/sessions/{session_id}/messages", response_model=ReelSessionMessagesResponse)
+async def get_session_messages(session_id: str) -> ReelSessionMessagesResponse:
+    """Full message history for one session (for switching back to a past chat)."""
+    db = await _get_db()
+    session = await db.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    rows = await db.get_recent_messages(session_id, limit=200)
+    return ReelSessionMessagesResponse(
+        session_id=session_id,
+        messages=[ReelChatMessage(role=r["role"], content=r["content"]) for r in rows],
+    )

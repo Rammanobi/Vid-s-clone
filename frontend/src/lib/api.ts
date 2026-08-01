@@ -78,6 +78,12 @@ export const api = {
       api.post(`/sessions/${sessionId}/messages`, { content, role: "user" }, token),
   },
 
+  prompts: {
+    list: (token: string) => api.get<PromptsResponse>("/admin/prompts", token),
+    update: (token: string, key: string, content: string) =>
+      api.put<PromptEntry & { key: string }>(`/admin/prompts/${key}`, { content }, token),
+  },
+
   agent: {
     chat: (token: string, sessionId: string, message: string, reelCount?: number) =>
       api.post<ChatResponse>(
@@ -134,6 +140,12 @@ export const api = {
       api.post<ReelBotIngestResponse>("/reel-bot/ingest", payload),
     chat: (payload: { instagram_handle: string; session_id: string | null; message: string }) =>
       api.post<ReelBotChatResponse>("/reel-bot/chat", payload),
+    sessions: (handle: string) =>
+      api.get<ReelBotSessionListResponse>(
+        `/reel-bot/sessions?instagram_handle=${encodeURIComponent(handle)}`
+      ),
+    sessionMessages: (sessionId: string) =>
+      api.get<ReelBotSessionMessagesResponse>(`/reel-bot/sessions/${sessionId}/messages`),
   },
 }
 
@@ -182,6 +194,15 @@ export interface ApiHealth {
   alerts?: string[]
 }
 
+export interface PromptEntry {
+  content: string
+  source: "database" | "env" | "default"
+}
+
+export interface PromptsResponse {
+  prompts: Record<string, PromptEntry>
+}
+
 export interface PipelineHealth {
   status: string
   pipeline: {
@@ -215,6 +236,21 @@ export interface ReelBotIngestResponse {
 export interface ReelBotChatResponse {
   session_id: string
   response: string
+}
+
+export interface ReelBotSessionSummary {
+  session_id: string
+  updated_at: string
+  preview: string
+}
+
+export interface ReelBotSessionListResponse {
+  sessions: ReelBotSessionSummary[]
+}
+
+export interface ReelBotSessionMessagesResponse {
+  session_id: string
+  messages: { role: string; content: string }[]
 }
 
 export interface SessionsResponse {

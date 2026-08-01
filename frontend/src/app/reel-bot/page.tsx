@@ -1,81 +1,88 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Send, Loader2, Plus, CheckCircle2 } from "lucide-react"
-import { api, type ReelBotIngestResponse } from "@/lib/api"
-import { PromptChips } from "./components/PromptChips"
-import { MessageBubble } from "./components/MessageBubble"
-import { PremiumLoadingIndicator } from "./components/PremiumLoadingIndicator"
+import { useState, useRef, useEffect, useCallback } from "react"
+import {
+  AtSign,
+  Lock,
+  Loader2,
+  Menu,
+  Plus,
+  Paperclip,
+  ArrowUp,
+  TrendingUp,
+  BarChart3,
+  ArrowLeftRight,
+  Lightbulb,
+  User,
+} from "lucide-react"
+import {
+  api,
+  type ReelBotIngestResponse,
+  type ReelBotSessionSummary,
+} from "@/lib/api"
+import { RichTextResponse } from "./components/RichTextResponse"
 
-type Phase = "ingestion" | "chat"
-type IngestPhase = "idle" | "fetching" | "downloading" | "transcribing" | "processing"
+type Phase = "connect" | "chat"
 
 interface Message {
   role: "user" | "assistant"
   content: string
 }
 
-type IngestResult = ReelBotIngestResponse
-
-const DEFAULT_SUGGESTIONS = [
-  "Which of my reels had the highest engagement?",
-  "What topics do I talk about most?",
-  "Am I speaking too fast or too slow?",
-  "What makes my top reel successful?",
-  "How has my performance changed recently?",
+const SUGGESTIONS = [
+  { icon: TrendingUp, label: "Best performing reel", prompt: "What is my best performing reel this month?" },
+  { icon: BarChart3, label: "Engagement drop analysis", prompt: "Analyze the engagement drop last week" },
+  { icon: ArrowLeftRight, label: "Benchmark vs top creators", prompt: "Compare my last 5 reels vs top creators" },
+  { icon: Lightbulb, label: "Hook ideas for tech", prompt: "Generate hook ideas for tech reviews" },
 ]
 
-const INGEST_MESSAGES: Record<IngestPhase, string> = {
-  idle: "Ready to connect...",
-  fetching: "🔍 Fetching your Instagram profile...",
-  downloading: "📥 Downloading your latest reels...",
-  transcribing: "🎙️ Transcribing audio with AI...",
-  processing: "⚙️ Analyzing and processing data...",
+function TypingDots() {
+  return (
+    <div className="flex w-full justify-start">
+      <div className="bg-[#f9f9f9] border border-[#cfc4c5] rounded-2xl rounded-tl-sm shadow-sm px-5 py-4 flex items-center gap-1.5">
+        <div className="w-1.5 h-1.5 bg-[#7e7576] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+        <div className="w-1.5 h-1.5 bg-[#7e7576] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+        <div className="w-1.5 h-1.5 bg-[#7e7576] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+      </div>
+    </div>
+  )
 }
 
 export default function ReelBotPage() {
-  const [phase, setPhase] = useState<Phase>("ingestion")
+  const [phase, setPhase] = useState<Phase>("connect")
   const [handle, setHandle] = useState("")
   const [handleInput, setHandleInput] = useState("")
   const [ingestLoading, setIngestLoading] = useState(false)
-  const [ingestPhase, setIngestPhase] = useState<IngestPhase>("idle")
   const [ingestError, setIngestError] = useState<string | null>(null)
-  const [ingestResult, setIngestResult] = useState<IngestResult | null>(null)
+  const [ingestResult, setIngestResult] = useState<ReelBotIngestResponse | null>(null)
 
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [chatLoading, setChatLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
+
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sessions, setSessions] = useState<ReelBotSessionSummary[]>([])
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, chatLoading])
 
-  useEffect(() => {
-    if (!ingestLoading) return
+  const refreshSessions = useCallback(async (h: string) => {
+    try {
+      const res = await api.reelBot.sessions(h)
+      setSessions(res.sessions)
+    } catch {
+      // Sidebar history is a nice-to-have - a failure here shouldn't block chat.
+    }
+  }, [])
 
-    const phases: IngestPhase[] = ["fetching", "downloading", "transcribing", "processing"]
-    let currentPhaseIndex = 0
-
-    const interval = setInterval(() => {
-      if (currentPhaseIndex < phases.length) {
-        setIngestPhase(phases[currentPhaseIndex])
-        currentPhaseIndex++
-      }
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [ingestLoading])
-
-  const handleIngest = async (e: React.FormEvent) => {
+  const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault()
     setIngestError(null)
-    setIngestPhase("fetching")
 
     const cleanHandle = handleInput.toLowerCase().replace(/^@/, "").trim()
     if (!cleanHandle) {
@@ -88,304 +95,320 @@ export default function ReelBotPage() {
       const result = await api.reelBot.ingest({ instagram_handle: cleanHandle })
       setIngestResult(result)
       setHandle(result.instagram_handle)
-      setIngestPhase("idle")
       setPhase("chat")
       setSessionId(null)
       setMessages([])
+      refreshSessions(result.instagram_handle)
     } catch (err) {
       setIngestError(err instanceof Error ? err.message : "Connection error")
-      setIngestPhase("idle")
     } finally {
       setIngestLoading(false)
     }
   }
 
-  const handleSendMessage = async (e: React.FormEvent | string) => {
-    const message = typeof e === "string" ? e : input
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || chatLoading || !handle) return
 
-    if (typeof e !== "string") {
-      e.preventDefault()
-    }
-
-    if (!message.trim() || chatLoading || !handle) return
-
-    const userMessage: Message = { role: "user", content: message }
-    setMessages((prev) => [...prev, userMessage])
+    const isFirstMessageOfSession = sessionId === null
+    setMessages((prev) => [...prev, { role: "user", content: text }])
     setInput("")
+    if (textareaRef.current) textareaRef.current.style.height = "40px"
     setChatLoading(true)
 
     try {
       const result = await api.reelBot.chat({
         instagram_handle: handle,
         session_id: sessionId,
-        message: message,
+        message: text,
       })
       setSessionId(result.session_id)
-
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: result.response,
-      }
-      setMessages((prev) => [...prev, assistantMessage])
+      setMessages((prev) => [...prev, { role: "assistant", content: result.response }])
+      if (isFirstMessageOfSession) refreshSessions(handle)
     } catch (err) {
-      const errorMsg =
-        err instanceof Error ? err.message : "Failed to get response"
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${errorMsg}` },
-      ])
+      const errorMsg = err instanceof Error ? err.message : "Failed to get response"
+      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${errorMsg}` }])
     } finally {
       setChatLoading(false)
     }
   }
 
-  const handleReset = () => {
-    setPhase("ingestion")
+  const handleNewChat = () => {
+    setSessionId(null)
+    setMessages([])
+  }
+
+  const handleNewAccount = () => {
+    setPhase("connect")
     setHandle("")
     setHandleInput("")
     setIngestResult(null)
     setMessages([])
     setSessionId(null)
+    setSessions([])
     setIngestError(null)
   }
 
-  if (phase === "ingestion") {
+  const openPastSession = async (s: ReelBotSessionSummary) => {
+    try {
+      const res = await api.reelBot.sessionMessages(s.session_id)
+      setMessages(res.messages as Message[])
+      setSessionId(res.session_id)
+    } catch {
+      // Leave current chat untouched if a past session can't be loaded.
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Connect screen
+  // ---------------------------------------------------------------------
+  if (phase === "connect") {
     return (
-      <div className="w-full max-w-2xl mx-auto py-12 px-4">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold mb-2 text-foreground">Reel Bot</h1>
-          <p className="text-foreground/60">
-            Analyze your Instagram Reels with AI-powered insights
+      <div className="min-h-screen flex items-center justify-center bg-[#f9f9f9] p-6">
+        <div className="w-full max-w-[420px] bg-white p-10 rounded-xl border border-[#cfc4c5] shadow-sm flex flex-col items-center text-center">
+          <div className="w-24 h-24 mb-6 rounded-full bg-[#f3f3f4] border border-[#cfc4c5] flex items-center justify-center overflow-hidden">
+            <span className="text-4xl">🤖</span>
+          </div>
+          <h1 className="text-[36px] leading-[44px] font-semibold tracking-tight text-[#1a1c1c] mb-2">
+            Reel Bot
+          </h1>
+          <p className="text-base text-[#4c4546] mb-8 max-w-[280px]">
+            Analyze your Instagram Reels with AI-powered insights.
           </p>
+
+          <form onSubmit={handleConnect} className="w-full flex flex-col gap-4">
+            <div className="relative w-full">
+              <AtSign className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-[#4c4546]" />
+              <input
+                type="text"
+                placeholder="username"
+                value={handleInput}
+                onChange={(e) => setHandleInput(e.target.value)}
+                disabled={ingestLoading}
+                className="w-full bg-white border border-[#cfc4c5] rounded-lg py-2 pr-4 pl-10 text-sm text-[#1a1c1c] placeholder-[#9CA3AF] focus:outline-none focus:border-black transition-colors h-[44px]"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={ingestLoading}
+              className="w-full bg-black text-white text-xs font-medium tracking-wide py-2 px-4 rounded-lg h-[44px] hover:bg-black/90 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+            >
+              {ingestLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Fetching your reels...
+                </>
+              ) : (
+                "Connect"
+              )}
+            </button>
+          </form>
+
+          {ingestError && (
+            <div className="mt-4 w-full p-3 bg-[#fbe9e7] border border-[#ba1a1a]/30 rounded-lg text-[#ba1a1a] text-sm">
+              {ingestError}
+            </div>
+          )}
+
+          <div className="mt-6 flex items-center gap-1.5 text-[#4c4546]/70 text-xs">
+            <Lock className="w-4 h-4" />
+            <span>Secure read-only access</span>
+          </div>
         </div>
-
-        <Card className="border-border/50 bg-secondary/5">
-          <CardHeader>
-            <CardTitle className="text-xl">Connect Your Account</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleIngest} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Instagram Handle
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    type="text"
-                    placeholder="@username"
-                    value={handleInput}
-                    onChange={(e) => setHandleInput(e.target.value)}
-                    disabled={ingestLoading}
-                    className="flex-1 bg-secondary/50 border-border/30 text-foreground placeholder:text-foreground/40"
-                  />
-                  <Button
-                    type="submit"
-                    disabled={ingestLoading}
-                    className="bg-amber-600/80 hover:bg-amber-600 text-white"
-                  >
-                    {ingestLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      "Connect"
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-foreground/50 mt-2">
-                  We analyze the last 20 public reels from your account
-                </p>
-              </div>
-
-              {ingestLoading && (
-                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" />
-                      <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
-                      <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                    </div>
-                    <span className="text-amber-400 font-medium text-sm">
-                      {INGEST_MESSAGES[ingestPhase]}
-                    </span>
-                  </div>
-                  <div className="h-1 bg-secondary/30 rounded-full overflow-hidden">
-                    <div className="h-full bg-amber-500/60 rounded-full w-3/4 animate-pulse" />
-                  </div>
-                </div>
-              )}
-
-              {ingestError && (
-                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-                  {ingestError}
-                </div>
-              )}
-
-              {ingestResult && (
-                <div className="p-6 bg-gradient-to-r from-green-600/10 to-emerald-600/5 border border-green-600/30 rounded-xl space-y-4 animate-fade-in shadow-lg">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-6 h-6 text-green-400" />
-                    <div>
-                      <p className="text-green-400 font-bold text-lg">Connected & Analyzed!</p>
-                      <p className="text-foreground/70 text-sm">
-                        Successfully analyzed {ingestResult.reels_synced} reels
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    {ingestResult.avg_wpm && (
-                      <div className="bg-secondary/40 border border-border/30 rounded-lg p-3">
-                        <p className="text-foreground/60 text-xs font-medium">Average Speaking Speed</p>
-                        <p className="text-xl font-bold text-amber-300 mt-1">{ingestResult.avg_wpm.toFixed(0)} WPM</p>
-                      </div>
-                    )}
-                    <div className="bg-secondary/40 border border-border/30 rounded-lg p-3">
-                      <p className="text-foreground/60 text-xs font-medium">Reels Analyzed</p>
-                      <p className="text-xl font-bold text-green-400 mt-1">{ingestResult.reels_synced}</p>
-                    </div>
-                  </div>
-
-                  {ingestResult.top_keywords.length > 0 && (
-                    <div>
-                      <p className="text-foreground/70 font-medium text-sm mb-2">Top Topics Discussed:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {ingestResult.top_keywords.map((kw) => (
-                          <Badge
-                            key={kw}
-                            className="bg-amber-600/30 text-amber-300 border-amber-600/50 font-medium"
-                          >
-                            {kw}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={() => setPhase("chat")}
-                    className="w-full mt-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white font-bold py-3 text-base shadow-lg hover:shadow-xl transition-all"
-                  >
-                    Start Chatting
-                  </Button>
-                </div>
-              )}
-            </form>
-          </CardContent>
-        </Card>
-
-        <p className="text-center text-foreground/40 text-xs mt-8">
-          No login required. We only analyze public data.
-        </p>
       </div>
     )
   }
 
+  // ---------------------------------------------------------------------
+  // Chat dashboard
+  // ---------------------------------------------------------------------
   return (
-    <div className="w-full h-screen flex flex-col bg-background">
-      {/* Header */}
-      <div className="border-b border-amber-600/20 bg-gradient-to-r from-secondary/40 to-transparent backdrop-blur-sm px-6 py-5 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-r from-amber-600 to-amber-700 flex items-center justify-center shadow-lg">
-              <span className="text-lg">🤖</span>
+    <div className="min-h-screen bg-white flex">
+      {/* Sidebar */}
+      <aside
+        className={`fixed left-0 top-0 h-screen bg-white border-r border-[#cfc4c5] flex flex-col z-20 transition-[width] duration-200 ${
+          sidebarOpen ? "w-[260px]" : "w-[56px]"
+        }`}
+      >
+        <div className="h-16 flex items-center px-4 border-b border-[#cfc4c5] justify-between">
+          {sidebarOpen && (
+            <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
+              <span className="text-lg flex-shrink-0">🤖</span>
+              <span className="text-lg font-semibold tracking-tight text-[#1a1c1c]">Reel Bot</span>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Reel Bot</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-sm text-foreground/70 font-medium">@{handle}</p>
-                <div className="flex items-center gap-1 text-sm text-green-400">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {ingestResult?.reels_synced || 0} reels analyzed
-                </div>
-              </div>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleReset}
-            className="text-foreground/60 hover:text-foreground hover:bg-amber-600/10 transition-all"
+          )}
+          <button
+            className="p-1.5 hover:bg-[#e8e8e8] rounded-full flex-shrink-0"
+            onClick={() => setSidebarOpen((o) => !o)}
+            aria-label="Toggle sidebar"
           >
-            <Plus className="w-4 h-4 mr-2" />
-            New Account
-          </Button>
+            <Menu className="w-5 h-5 text-[#1a1c1c]" />
+          </button>
         </div>
-      </div>
 
-      {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto w-full">
-        <div className="w-full max-w-3xl mx-auto px-6 py-8 space-y-6">
+        <div className="p-2">
+          <button
+            onClick={handleNewChat}
+            className="w-full flex items-center justify-center gap-2 p-2 border border-[#cfc4c5] rounded-lg hover:bg-[#f3f3f4] transition-colors text-[#1a1c1c]"
+          >
+            <Plus className="w-4 h-4 flex-shrink-0" />
+            {sidebarOpen && <span className="text-xs font-medium">New Chat</span>}
+          </button>
+        </div>
+
+        {sidebarOpen && (
+          <div className="flex-1 overflow-y-auto px-2 flex flex-col gap-1">
+            <span className="px-2 py-1 text-[11px] text-[#4c4546] font-medium uppercase tracking-wider">
+              History
+            </span>
+            {sessions.length === 0 ? (
+              <p className="px-2 py-1 text-xs text-[#4c4546]/70">No past conversations yet</p>
+            ) : (
+              sessions.map((s) => (
+                <button
+                  key={s.session_id}
+                  onClick={() => openPastSession(s)}
+                  className={`text-left p-2 rounded-lg hover:bg-[#f3f3f4] flex flex-col gap-0.5 transition-colors ${
+                    s.session_id === sessionId ? "bg-[#f3f3f4]" : ""
+                  }`}
+                >
+                  <span className="text-sm text-[#1a1c1c] truncate">{s.preview}</span>
+                  <span className="text-[11px] text-[#4c4546]">
+                    {new Date(s.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
+        <div className="p-2 border-t border-[#cfc4c5] mt-auto">
+          <div className="flex items-center gap-2 p-2">
+            <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center flex-shrink-0">
+              <User className="w-4 h-4 text-white" />
+            </div>
+            {sidebarOpen && (
+              <div className="flex flex-col min-w-0 overflow-hidden">
+                <span className="text-sm font-bold truncate text-[#1a1c1c]">@{handle}</span>
+                <span className="text-[10px] px-1.5 py-0.5 bg-[#e8e8e8] border border-[#cfc4c5] rounded w-fit">
+                  {ingestResult?.reels_synced ?? 0} reels analyzed
+                </span>
+              </div>
+            )}
+          </div>
+          {sidebarOpen && (
+            <button
+              onClick={handleNewAccount}
+              className="px-2 py-1 text-xs text-[#4c4546] hover:text-[#1a1c1c] transition-colors mt-1"
+            >
+              New Account
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div className={`flex-1 flex flex-col min-h-screen transition-[padding] duration-200 ${sidebarOpen ? "pl-[260px]" : "pl-[56px]"}`}>
+        <header className="h-16 flex items-center px-6 border-b border-[#cfc4c5] flex-shrink-0 sticky top-0 bg-white z-10">
+          <span className="text-sm font-bold text-[#1a1c1c]">@{handle}</span>
+          <span className="mx-2 text-[#7e7576]">·</span>
+          <span className="text-sm text-[#4c4546]">{ingestResult?.reels_synced ?? 0} reels analyzed</span>
+        </header>
+
+        <div className="flex-1 overflow-y-auto px-6 py-10 flex flex-col gap-6 w-full max-w-3xl mx-auto pb-32">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center">
-              <div className="space-y-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-foreground mb-2">
-                    Ask about your reels
-                  </h2>
-                  <p className="text-foreground/60 text-sm">
-                    Get insights about your content performance and strategy
-                  </p>
-                </div>
-
-                <PromptChips
-                  suggestions={DEFAULT_SUGGESTIONS}
-                  onSelect={handleSendMessage}
-                  disabled={chatLoading}
-                />
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <div className="w-16 h-16 rounded-2xl bg-[#f9f9f9] flex items-center justify-center mb-6 border border-[#cfc4c5] shadow-sm">
+                <span className="text-2xl">🤖</span>
+              </div>
+              <h1 className="text-[28px] leading-[36px] font-semibold text-[#1a1c1c] mb-2 tracking-tight">
+                Reel Analysis AI
+              </h1>
+              <p className="text-base text-[#4c4546] max-w-md mb-8">
+                I&apos;m ready to analyze your recent performance, engagement trends, and content strategy. What
+                would you like to know?
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 max-w-2xl">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => sendMessage(s.prompt)}
+                    className="px-4 py-2 bg-[#f9f9f9] rounded-full border border-[#cfc4c5] hover:border-black hover:bg-[#f3f3f4] transition-all flex items-center gap-2 text-sm font-medium text-[#1a1c1c]"
+                  >
+                    <s.icon className="w-4 h-4 text-[#4c4546]" />
+                    {s.label}
+                  </button>
+                ))}
               </div>
             </div>
           ) : (
-            messages.map((msg, idx) => (
-              <MessageBubble
-                key={idx}
-                role={msg.role}
-                content={msg.content}
-              />
+            messages.map((m, idx) => (
+              <div key={idx} className={`flex w-full ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                {m.role === "user" ? (
+                  <div className="max-w-[80%] bg-[#eeeeee] py-3 px-5 rounded-2xl rounded-tr-sm text-[#1a1c1c] text-base">
+                    {m.content}
+                  </div>
+                ) : (
+                  <div className="max-w-[85%] bg-[#f9f9f9] border border-[#cfc4c5] py-3 px-5 rounded-2xl rounded-tl-sm shadow-sm">
+                    <RichTextResponse content={m.content} theme="mono" />
+                  </div>
+                )}
+              </div>
             ))
           )}
-
-          {chatLoading && <PremiumLoadingIndicator />}
-
+          {chatLoading && <TypingDots />}
           <div ref={messagesEndRef} />
         </div>
-      </div>
 
-      {/* Input Area - Fixed at Bottom */}
-      <div className="w-full bg-gradient-to-t from-secondary/30 via-secondary/15 to-transparent px-6 py-8 flex-shrink-0 border-t border-border/20">
-        <form onSubmit={handleSendMessage} className="w-full max-w-3xl mx-auto">
-          <div className="relative flex items-end gap-3 bg-gradient-to-r from-secondary/60 to-secondary/40 backdrop-blur-sm border border-amber-600/30 rounded-3xl px-6 py-4 transition-all duration-200 hover:border-amber-600/50 hover:bg-gradient-to-r hover:from-secondary/70 hover:to-secondary/50 focus-within:border-amber-500/60 focus-within:ring-2 focus-within:ring-amber-500/30">
-            {/* Textarea for growing input */}
-            <textarea
-              placeholder="Ask about your reels, engagement trends, content strategy..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={chatLoading}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSendMessage(input)
-                }
-              }}
-              className="flex-1 bg-transparent text-foreground placeholder:text-foreground/50 text-base resize-none outline-none min-h-14 max-h-32 py-2 font-medium"
-              rows={1}
-            />
-
-            {/* Send Button */}
-            <Button
-              type="submit"
-              disabled={chatLoading || !input.trim()}
-              className="flex-shrink-0 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-full p-3 transition-all duration-200 shadow-lg hover:shadow-2xl hover:scale-110 disabled:opacity-50 disabled:scale-100 h-12 w-12 flex items-center justify-center"
-            >
-              {chatLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
-            </Button>
-          </div>
-          <p className="text-xs text-foreground/40 mt-3 text-center">
-            Press Enter to send • Shift+Enter for new line
-          </p>
-        </form>
+        {/* Input */}
+        <div
+          className={`fixed bottom-0 right-0 bg-gradient-to-t from-white via-white to-transparent pt-8 pb-6 px-6 transition-[left] duration-200 ${
+            sidebarOpen ? "left-[260px]" : "left-[56px]"
+          }`}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              sendMessage(input)
+            }}
+            className="max-w-3xl mx-auto"
+          >
+            <div className="bg-[#f9f9f9] rounded-xl border border-[#cfc4c5] flex items-end p-2 shadow-sm focus-within:border-black transition-all">
+              <button type="button" className="p-2 text-[#4c4546] hover:text-black transition-colors rounded-lg flex-shrink-0" title="Attach data (coming soon)" disabled>
+                <Paperclip className="w-5 h-5" />
+              </button>
+              <textarea
+                ref={textareaRef}
+                placeholder="Ask about your reels..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={chatLoading}
+                onInput={(e) => {
+                  const el = e.currentTarget
+                  el.style.height = ""
+                  el.style.height = `${el.scrollHeight}px`
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    sendMessage(input)
+                  }
+                }}
+                className="w-full bg-transparent border-none focus:ring-0 resize-none text-base text-[#1a1c1c] placeholder-[#9CA3AF] py-2 px-2 max-h-32 min-h-[40px] outline-none"
+                rows={1}
+              />
+              <button
+                type="submit"
+                disabled={chatLoading || !input.trim()}
+                className="bg-black text-white p-2 rounded-lg hover:bg-[#333] transition-colors flex-shrink-0 flex items-center justify-center shadow-sm ml-2 disabled:opacity-40 h-9 w-9"
+              >
+                {chatLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowUp className="w-5 h-5" />}
+              </button>
+            </div>
+            <p className="text-center mt-2 text-[10px] text-[#4c4546] tracking-wide uppercase">
+              Reel Bot may produce inaccurate information about real-time metrics.
+            </p>
+          </form>
+        </div>
       </div>
     </div>
   )

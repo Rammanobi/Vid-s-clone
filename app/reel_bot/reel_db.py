@@ -148,6 +148,33 @@ class ReelBotDatabaseClient:
 
         return session_id
 
+    async def list_sessions(self, handle: str, limit: int = 20) -> list[dict[str, Any]]:
+        """List recent chat sessions for a handle, newest first, each with a
+        preview of its first user message (for a sidebar history list)."""
+        pool = await self._ensure_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    s."id" AS session_id,
+                    s."updatedAt",
+                    (
+                        SELECT m."content" FROM "ReelBotChatMessage" m
+                        WHERE m."sessionId" = s."id" AND m."role" = 'user'
+                        ORDER BY m."createdAt" ASC LIMIT 1
+                    ) AS preview
+                FROM "ReelBotSession" s
+                WHERE s."instagramHandle" = $1
+                ORDER BY s."updatedAt" DESC
+                LIMIT $2
+                """,
+                handle,
+                limit,
+            )
+
+        return [dict(row) for row in rows if row["preview"]]
+
     async def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Fetch session metadata."""
         pool = await self._ensure_pool()

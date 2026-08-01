@@ -30,6 +30,21 @@ class ReelChatResponse(BaseModel):
     response: str
 
 
+class ReelSessionSummary(BaseModel):
+    session_id: str
+    updated_at: str
+    preview: str
+
+
+class ReelSessionListResponse(BaseModel):
+    sessions: list[ReelSessionSummary] = Field(default_factory=list)
+
+
+class ReelSessionMessagesResponse(BaseModel):
+    session_id: str
+    messages: list[ReelChatMessage] = Field(default_factory=list)
+
+
 class StoredReel(BaseModel):
     instagram_handle: str
     instagram_reel_id: str

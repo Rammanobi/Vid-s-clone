@@ -31,7 +31,6 @@ const THEME_CLASSES = {
     bold: "font-bold text-amber-300",
     italic: "italic text-foreground/80",
     inlineCode: "bg-black/30 px-2 py-1 rounded text-amber-100 text-xs font-mono",
-    stat: "font-semibold text-amber-300 bg-amber-600/10 px-2 py-1 rounded",
     wrap: "prose prose-invert max-w-none text-foreground",
   },
   mono: {
@@ -53,7 +52,6 @@ const THEME_CLASSES = {
     bold: "font-bold text-[#1a1c1c]",
     italic: "italic text-[#4c4546]",
     inlineCode: "bg-[#eeeeee] px-2 py-1 rounded text-[#1a1c1c] text-xs font-mono",
-    stat: "font-semibold text-[#1a1c1c] bg-[#eeeeee] px-2 py-1 rounded",
     wrap: "prose max-w-none text-[#1a1c1c]",
   },
 } as const
@@ -284,18 +282,13 @@ export function RichTextResponse({ content, theme = "amber" }: RichTextResponseP
     const parts: React.ReactNode[] = []
     let lastIndex = 0
 
-    // Pattern for [link](url), **bold**, *italic*, `code`, and numbers.
+    // Pattern for [link](url), **bold**, *italic*, and `code`. Numbers are
+    // intentionally NOT auto-highlighted - they used to get a grey pill
+    // background, but the user wants plain, normal-looking output; a number
+    // only stands out when the AI itself chose to **bold** it.
     // Link goes first: an LLM-provided [desc](url) must win over any other
     // rule that might otherwise match inside its bracket/paren text.
-    //
-    // The number branch matches a full number TOKEN as one piece - digits,
-    // optional thousands commas, optional decimal ("7.3"), optional space,
-    // optional k/m/b magnitude suffix, optional %, optional trailing unit
-    // word. Without the decimal/suffix parts, the tone-fix prompt's now-
-    // common abbreviated numbers ("7.3 k", "186 k views") got matched as
-    // fragments - "7" and "3" boxed separately with the "." and "k" left
-    // as plain unstyled text in between, instead of one clean highlight.
-    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(\$?\d+(?:,\d+)*(?:\.\d+)?(?:\s?[kKmMbB])?%?(?:\s(?:views?|likes?|comments?|shares?|reels?|reel))?)/gi
+    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`/gi
 
     let match
     const regex = new RegExp(pattern)
@@ -344,13 +337,6 @@ export function RichTextResponse({ content, theme = "amber" }: RichTextResponseP
           <code key={`code-${match.index}`} className={T.inlineCode}>
             {match[5]}
           </code>
-        )
-      } else if (match[6]) {
-        // Numbers/stats
-        parts.push(
-          <span key={`stat-${match.index}`} className={T.stat}>
-            {match[6]}
-          </span>
         )
       }
 

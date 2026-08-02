@@ -59,8 +59,9 @@ def _build_prompt(
         get_reel_bot_chat_prompt()
         + "\n\nREEL DATA (LAST 20):\n\n"
         + _format_reel_block(reels)
-        + "\n\nFollow these rules strictly. Your job is to be a data analyst grounded in the "
-          "metrics above. Match your output format to what the user asked for."
+        + "\n\nFollow these rules strictly. Ground every claim in the data above. REEL DATA is "
+          "a machine-readable dump - never mirror its formatting in your reply; answer like a "
+          "person talking, not a printout."
     )
 
     messages = [{"role": "system", "content": system_prompt}]

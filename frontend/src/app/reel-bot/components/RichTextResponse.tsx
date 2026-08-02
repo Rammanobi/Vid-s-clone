@@ -284,10 +284,18 @@ export function RichTextResponse({ content, theme = "amber" }: RichTextResponseP
     const parts: React.ReactNode[] = []
     let lastIndex = 0
 
-    // Pattern for [link](url), **bold**, *italic*, `code`, and bare numbers.
+    // Pattern for [link](url), **bold**, *italic*, `code`, and numbers.
     // Link goes first: an LLM-provided [desc](url) must win over any other
     // rule that might otherwise match inside its bracket/paren text.
-    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(\d+(?:,\d+)*%?|\d+(?:,\d+)* (?:views?|likes?|comments?|shares?|reels?|reel))/gi
+    //
+    // The number branch matches a full number TOKEN as one piece - digits,
+    // optional thousands commas, optional decimal ("7.3"), optional space,
+    // optional k/m/b magnitude suffix, optional %, optional trailing unit
+    // word. Without the decimal/suffix parts, the tone-fix prompt's now-
+    // common abbreviated numbers ("7.3 k", "186 k views") got matched as
+    // fragments - "7" and "3" boxed separately with the "." and "k" left
+    // as plain unstyled text in between, instead of one clean highlight.
+    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|(\$?\d+(?:,\d+)*(?:\.\d+)?(?:\s?[kKmMbB])?%?(?:\s(?:views?|likes?|comments?|shares?|reels?|reel))?)/gi
 
     let match
     const regex = new RegExp(pattern)

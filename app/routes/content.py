@@ -14,7 +14,6 @@ from app.monitoring import (
     content_intelligence_last_run_duration_seconds,
     content_intelligence_last_run_timestamp,
     content_intelligence_runs_total,
-    http_request_duration_seconds,
     http_requests_total,
 )
 

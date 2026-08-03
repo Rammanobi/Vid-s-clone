@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 
 from app.auth import authenticate_admin, create_access_token, get_current_user
-from app.db import DatabaseClient
 from app.logging_setup import get_logger
 from app.monitoring import auth_attempts_total
 

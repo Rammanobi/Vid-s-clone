@@ -90,7 +90,7 @@ class LLMClient:
                     f"LLM API error: {status} - {resp.text[:200]}"
                 )
 
-            except httpx.TimeoutException as exc:
+            except httpx.TimeoutException:
                 elapsed = time.monotonic() - start
                 llm_request_duration_seconds.labels(provider="openai").observe(elapsed)
                 last_error = LLMClientError(f"LLM timeout (attempt {attempt + 1})")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 
 from app.reel_bot.config import settings
 from app.reel_bot.reel_db import ReelBotDatabaseClient

@@ -6,7 +6,6 @@ from typing import Any
 from app.logging_setup import get_logger
 from app.ocr.media import cleanup, download_video
 from app.ocr.processor import (
-    deduplicate,
     merge_frame_texts,
     ocr_frame,
     sample_frames,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from app.logging_setup import get_logger
 from app.schema_validator import (

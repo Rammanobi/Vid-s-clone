@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import patch
 
 import numpy as np
-import pytest
 
 from app.selector import (
-    ModalityDecision,
     ModalityScores,
     compute_text_score,
     compute_visual_change_score,

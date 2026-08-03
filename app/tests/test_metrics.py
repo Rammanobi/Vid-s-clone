@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 
 from app.metrics import (
     VIRALITY_ENGAGEMENT_WEIGHT,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -17,7 +17,6 @@ from app.llm_intelligence import (
     is_input_partial,
 )
 from app.main import app
-from app.schema_validator import ContentIntelligenceSchema
 
 pytestmark = pytest.mark.asyncio
 

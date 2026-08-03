@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from app.clip.extractor import extract_visual_features
@@ -11,7 +10,6 @@ from app.intelligence import extract_intelligence
 from app.logging_setup import get_logger
 from app.ocr.extractor import extract_text_overlays_with_frames
 from app.selector import (
-    ModalityScores,
     compute_text_score,
     compute_visual_change_score,
     decide_modalities,

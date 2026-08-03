@@ -151,7 +151,7 @@ class Settings:
 
             if errors:
                 raise ValueError(
-                    f"Production configuration errors:\n- "
+                    "Production configuration errors:\n- "
                     + "\n- ".join(errors)
                 )
         else:

@@ -4,12 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.auth import get_current_user
 from app.cache import get_redis
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
-from app.monitoring import http_request_duration_seconds, http_requests_total
+from app.monitoring import http_requests_total
 
 logger = get_logger(__name__)
 

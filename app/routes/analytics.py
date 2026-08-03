@@ -14,7 +14,6 @@ from app.monitoring import (
     analytics_last_run_duration_seconds,
     analytics_last_run_timestamp,
     analytics_runs_total,
-    http_request_duration_seconds,
     http_requests_total,
 )
 

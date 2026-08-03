@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Any
 
 import httpx
 
@@ -79,7 +77,7 @@ class ReelBotLLMClient:
 
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 if attempt == max_retries - 1:
-                    raise LLMError(f"Max retries exceeded for LLM call") from exc
+                    raise LLMError("Max retries exceeded for LLM call") from exc
                 await asyncio.sleep(2 ** attempt)
 
             except httpx.HTTPStatusError as exc:

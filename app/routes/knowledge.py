@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,10 +8,6 @@ from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
 from app.monitoring import (
-    creator_intelligence_errors_total,
-    creator_intelligence_last_run_duration_seconds,
-    creator_intelligence_last_run_timestamp,
-    creator_intelligence_runs_total,
     http_requests_total,
     knowledge_consecutive_failures,
     knowledge_scheduler_running,

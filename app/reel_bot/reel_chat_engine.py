@@ -41,7 +41,7 @@ def _format_reel_block(reels: list[dict[str, Any]]) -> str:
                 transcript = transcript[:300] + "..."
             lines.append(f"  Transcript: \"{transcript}\"")
         else:
-            lines.append(f"  Transcript: [NOT AVAILABLE - transcription failed]")
+            lines.append("  Transcript: [NOT AVAILABLE - transcription failed]")
 
         lines.append("")
 

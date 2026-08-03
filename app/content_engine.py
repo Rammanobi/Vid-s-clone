@@ -10,11 +10,6 @@ from app.llm_intelligence import extract_intelligence_hybrid
 from app.logging_setup import get_logger
 from app.monitoring import (
     content_intelligence_reels_processed_total,
-    content_intelligence_runs_total,
-    content_intelligence_run_duration_seconds,
-    content_intelligence_errors_total,
-    content_intelligence_last_run_timestamp,
-    content_intelligence_last_run_duration_seconds,
 )
 from app.routes.content import record_content_intelligence_run, record_content_intelligence_error
 

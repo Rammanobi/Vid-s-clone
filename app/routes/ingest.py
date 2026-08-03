@@ -9,7 +9,7 @@ from app.auth import get_current_user
 from app.db import DatabaseClient
 from app.deps import get_db_dependency
 from app.logging_setup import get_logger
-from app.monitoring import db_queries_total, http_request_duration_seconds, http_requests_total
+from app.monitoring import db_queries_total
 from app.pipeline import PipelineStage, run_pipeline
 
 logger = get_logger(__name__)

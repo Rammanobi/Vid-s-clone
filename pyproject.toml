@@ -65,3 +65,12 @@ dev = [
     "ruff>=0.11,<1",
     "mypy>=1.13,<2",
 ]
+
+[tool.ruff.lint]
+# Pinned explicitly: with no [tool.ruff] config, ruff's own default rule
+# set differs sharply by version (a few hundred checks on 0.11.x vs ~788
+# on 0.16.x) - CI resolving a newer ruff than a dev's local install caused
+# lint to pass locally and fail in CI on rule categories (bandit, pylint,
+# simplify, async, pyupgrade, isort) nobody had opted into. This pins the
+# actual enforced set to match what the codebase has been written against.
+select = ["E4", "E7", "E9", "F"]

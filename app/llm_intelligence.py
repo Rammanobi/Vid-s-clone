@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
 
 from app.intelligence import extract_intelligence
 from app.llm import LLMClient
 from app.logging_setup import get_logger
+from app.prompts import get_content_intelligence_prompt
 from app.schema_validator import ContentIntelligenceSchema
 
 logger = get_logger(__name__)
-
-from app.prompts import get_content_intelligence_prompt
 
 PARTIAL_INPUT_THRESHOLD = 2
 

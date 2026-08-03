@@ -12,6 +12,12 @@ from app.graph.state import GraphState
 from app.graph.tools import get_conversation_memory
 from app.llm import LLMClient
 from app.logging_setup import get_logger
+from app.prompts import (
+    get_intent_extraction_prompt,
+    get_query_rewrite_prompt,
+    get_reasoner_prompt,
+    get_recommendation_prompt,
+)
 from app.reranker import (
     RERANKER_TOP_K,
     compute_retrieval_confidence,
@@ -24,13 +30,6 @@ logger = get_logger(__name__)
 
 CLARIFYING_THRESHOLD = 0.5
 HIGH_CONFIDENCE_THRESHOLD = 0.8
-
-from app.prompts import (
-    get_intent_extraction_prompt,
-    get_query_rewrite_prompt,
-    get_reasoner_prompt,
-    get_recommendation_prompt,
-)
 
 
 def _config_to_db(config: RunnableConfig) -> DatabaseClient:
@@ -696,7 +695,7 @@ def _detect_recommendation_feedback(
     response: str | None,
 ) -> str | None:
     query_lower = query.lower()
-    if has_recommendations := "**Recommendations:**" in (response or ""):
+    if "**Recommendations:**" in (response or ""):
         if any(akw in query_lower for akw in ACCEPT_KEYWORDS):
             return "accepted"
         if any(rkw in query_lower for rkw in REJECT_KEYWORDS):

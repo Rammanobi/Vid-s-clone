@@ -11,13 +11,6 @@ from app.competitor_integration import (
 )
 from app.db import DatabaseClient
 from app.logging_setup import get_logger
-from app.monitoring import (
-    creator_intelligence_errors_total,
-    creator_intelligence_last_run_duration_seconds,
-    creator_intelligence_last_run_timestamp,
-    creator_intelligence_reels_processed_total,
-    creator_intelligence_runs_total,
-)
 from app.patterns import analyze_patterns
 from app.routes.creator import record_creator_intelligence_run, record_creator_intelligence_error
 
@@ -81,7 +74,6 @@ async def persist_creator_profile(
 ) -> dict[str, Any] | None:
     patterns = intelligence.get("patterns", {})
     competitor_trends = intelligence.get("competitor_trends", {})
-    niche = intelligence.get("niche")
 
     best_topics = patterns.get("best_topics", [])
     worst_topics = patterns.get("worst_topics", [])

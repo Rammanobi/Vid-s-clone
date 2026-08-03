@@ -28,7 +28,7 @@ _OPENCLIP_PRETRAINED = "webli"
 def _try_load_openclip() -> Any:
     try:
         import open_clip  # type: ignore[import-untyped]
-        import torch  # type: ignore[import-untyped]
+        import torch  # type: ignore[import-untyped]  # noqa: F401 - probes availability before loading the model
 
         model, _, preprocess = open_clip.create_model_and_transforms(
             _OPENCLIP_MODEL_NAME,

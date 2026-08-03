@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -88,7 +87,7 @@ async def run_ingestion_stage(
 
         for username in usernames:
             try:
-                result = await orchestrator.ingest_creator(
+                await orchestrator.ingest_creator(
                     username=username,
                     max_reels=max_reels,
                     max_comments=max_comments,

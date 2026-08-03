@@ -52,6 +52,8 @@ def get_speech_score(audio_bytes: bytes) -> float:
     if not audio_bytes or len(audio_bytes) < 44:
         return 0.0
 
+    import torch  # type: ignore[import-untyped]
+
     audio, sample_rate = _read_wave(audio_bytes)
     if len(audio) == 0:
         return 0.0

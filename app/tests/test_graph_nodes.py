@@ -31,7 +31,6 @@ from app.graph.nodes import (
 )
 from app.reranker import (
     RERANKER_TOP_K,
-    _compute_reranker_score,
     _fuse_scores,
     _get_candidate_text,
     compute_retrieval_confidence,
@@ -368,7 +367,7 @@ class TestParallelRetrievalNode:
             **STATE,
             "retrieval_plan": [{"source": "nonexistent_tool"}],
         }
-        with patch("app.graph.nodes.logger") as mock_log:
+        with patch("app.graph.nodes.logger"):
             result = await parallel_retrieval_node(state, _make_config(db=db))
         assert result["creator_context"] is None
         assert result["analytics_context"] is None

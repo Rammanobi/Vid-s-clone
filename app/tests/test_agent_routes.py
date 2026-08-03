@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import status
-from httpx import ASGITransport, AsyncClient, WSGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.auth import get_current_user
 from app.deps import get_db_dependency
@@ -34,7 +34,6 @@ def _mock_graph_result(**overrides: Any) -> dict[str, Any]:
         "competitor_context": None,
         "retrieved_documents": None,
         "ranked_context": {},
-        "citations": None,
         "conversation_memory": None,
         "retrieval_plan": None,
         "metadata_filters": None,

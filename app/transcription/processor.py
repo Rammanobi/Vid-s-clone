@@ -7,7 +7,7 @@ from typing import Any
 
 from app.logging_setup import get_logger
 from app.transcription.media import cleanup, download_video, extract_audio
-from app.transcription.vad import get_speech_score
+from app.transcription.vad import get_speech_score  # noqa: F401 - patched in tests; see below
 from app.transcription.whisper import transcribe, whisper_available
 
 logger = get_logger(__name__)

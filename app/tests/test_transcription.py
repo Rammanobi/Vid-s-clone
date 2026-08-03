@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import json
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.transcription.models import TranscriptResult, TranscriptSegment
-from app.transcription.vad import _SPEECH_PROB_THRESHOLD, get_speech_score
+from app.transcription.vad import get_speech_score
 
 
 class TestTranscriptModels:
@@ -213,7 +209,6 @@ class TestProcessorEdgeCases:
 
 
 def _build_silent_wav(duration_sec: float, sample_rate: int = 16000) -> bytes:
-    import struct
     import wave
     import io
     buf = io.BytesIO()

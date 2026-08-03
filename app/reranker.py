@@ -163,11 +163,6 @@ def compute_retrieval_confidence(
         c.get("reranker_score") for c in candidates
         if c.get("reranker_score") is not None
     ]
-    bm25_scores = [
-        c.get("bm25_score") for c in candidates
-        if c.get("bm25_score") is not None
-    ]
-
     retrieval_score = max(retrieval_scores) if retrieval_scores else 0.0
     reranker_score = max(reranker_scores) if reranker_scores else 0.0
 

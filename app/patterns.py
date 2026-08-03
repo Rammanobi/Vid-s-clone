@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from app.logging_setup import get_logger
@@ -227,7 +227,6 @@ def detect_content_gaps(
 ) -> list[str]:
     existing_topics = {_topic_for_reel(r) for r in reels if _topic_for_reel(r)}
     existing_intents = {_audience_intent_for_reel(r) for r in reels if _audience_intent_for_reel(r)}
-    existing_formats = {_content_format_for_reel(r) for r in reels if _content_format_for_reel(r)}
     missing_topics: list[str] = []
     if trending_topics:
         for t in trending_topics:
